@@ -20,5 +20,6 @@
         public string Description { get; set; }
 
         public ICollection<TripParticipant> Participants { get; set; }
+        public ICollection<TripScheduleItem> ScheduleItems { get; set; }
     }
 }

@@ -16,6 +16,8 @@ public static class InfrastructureServiceCollectionExtensions
 
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
+        services.AddScoped<ITripRepository, TripRepository>();
+        services.AddScoped<ITripScheduleRepository, TripScheduleRepository>();
 
         return services;
     }

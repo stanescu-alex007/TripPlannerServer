@@ -45,6 +45,7 @@ public class UserRepository : IUserRepository
 
     Task IUserRepository.DeleteAsync(User user)
     {
-        throw new NotImplementedException();
+        _context.Users.Remove(user);
+        return _context.SaveChangesAsync();
     }
 }

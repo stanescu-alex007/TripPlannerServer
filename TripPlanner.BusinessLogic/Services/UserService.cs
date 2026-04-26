@@ -41,6 +41,8 @@ namespace TripPlanner.BusinessLogic.Services
             user.FirstName = request.FirstName.Trim();
             user.LastName = request.LastName.Trim();
             user.Phone = request.Phone;
+            if (request.ImageUrl is not null)
+                user.ImageUrl = request.ImageUrl;
 
             await _userRepository.UpdateAsync(user);
 

@@ -1,6 +1,7 @@
 ﻿namespace TripPlanner.WEB.Controllers
 {
     using Microsoft.AspNetCore.Authorization;
+    using Microsoft.AspNetCore.Hosting;
     using Microsoft.AspNetCore.Mvc;
     using System.Security.Claims;
     using TripPlanner.Core.Interfaces.IServices;
@@ -11,10 +12,12 @@
     public class AuthController : ControllerBase
     {
         private readonly IAuthService _authService;
+        private readonly IWebHostEnvironment _env;
 
-        public AuthController(IAuthService authService)
+        public AuthController(IAuthService authService, IWebHostEnvironment env)
         {
             _authService = authService;
+            _env = env;
         }
 
         [HttpPost("register")]
@@ -23,9 +26,9 @@
             var result = await _authService.RegisterAsync(request);
 
             if (!result.Success)
-                return BadRequest(result.Message);
+                return BadRequest(new { success = false, message = result.Message });
 
-            return Ok();
+            return Ok(new { success = true, message = "Account created successfully." });
         }
 
         [HttpPost("login")]
@@ -34,12 +37,13 @@
             var result = await _authService.LoginAsync(request);
 
             if (!result.Success)
-                return Unauthorized(result.Message);
+                return Unauthorized(new { success = false, message = result.Message ?? "Invalid credentials." });
 
-            SetRefreshTokenCookie(result.RefreshToken);
+            SetRefreshTokenCookie(result.RefreshToken!);
 
             return Ok(new
             {
+                success = true,
                 accessToken = result.AccessToken
             });
         }
@@ -50,36 +54,43 @@
             var refreshToken = Request.Cookies["refreshToken"];
 
             if (string.IsNullOrEmpty(refreshToken))
-                return Unauthorized();
+                return Unauthorized(new { success = false, message = "No refresh token." });
 
             var result = await _authService.RefreshAsync(refreshToken);
 
             if (!result.Success)
-                return Unauthorized();
+                return Unauthorized(new { success = false, message = "Session expired." });
 
-            SetRefreshTokenCookie(result.RefreshToken);
+            SetRefreshTokenCookie(result.RefreshToken!);
 
             return Ok(new
             {
+                success = true,
                 accessToken = result.AccessToken
             });
         }
 
+        // Logout does NOT require [Authorize] so it works even if the access token
+        // has already expired — the refresh cookie is enough to identify and revoke.
         [HttpPost("logout")]
-        [Authorize]
+        [AllowAnonymous]
         public async Task<IActionResult> Logout()
         {
-            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var refreshToken = Request.Cookies["refreshToken"];
 
-            if (userId == null || refreshToken == null)
-                return Unauthorized();
-
-            await _authService.RevokeAsync(Guid.Parse(userId), refreshToken);
-
+            // Always delete the cookie regardless of whether revocation succeeds
             Response.Cookies.Delete("refreshToken");
 
-            return Ok();
+            if (!string.IsNullOrEmpty(refreshToken))
+            {
+                var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (Guid.TryParse(userIdClaim, out var userId))
+                {
+                    await _authService.RevokeAsync(userId, refreshToken);
+                }
+            }
+
+            return Ok(new { success = true });
         }
 
         private void SetRefreshTokenCookie(string token)
@@ -87,7 +98,9 @@
             Response.Cookies.Append("refreshToken", token, new CookieOptions
             {
                 HttpOnly = true,
-                Secure = true,
+                // In development the backend typically runs on HTTP, so Secure must be false
+                // to allow the browser to store the cookie. In production always use HTTPS.
+                Secure = !_env.IsDevelopment(),
                 SameSite = SameSiteMode.Strict,
                 Expires = DateTime.UtcNow.AddDays(7)
             });

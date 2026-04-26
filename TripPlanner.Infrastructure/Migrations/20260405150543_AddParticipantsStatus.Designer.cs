@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using TripPlanner.Infrastructure.Data;
@@ -11,9 +12,11 @@ using TripPlanner.Infrastructure.Data;
 namespace TripPlanner.Infrastructure.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260405150543_AddParticipantsStatus")]
+    partial class AddParticipantsStatus
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -144,50 +147,6 @@ namespace TripPlanner.Infrastructure.Migrations
                     b.ToTable("TripParticipants");
                 });
 
-            modelBuilder.Entity("TripPlanner.Core.Entities.TripScheduleItem", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTime>("Date")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Description")
-                        .HasColumnType("text");
-
-                    b.Property<string>("EndTime")
-                        .HasColumnType("text");
-
-                    b.Property<int>("Order")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("StartTime")
-                        .HasColumnType("text");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("text")
-                        .HasDefaultValue("Pending");
-
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<Guid>("TripId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("TripId");
-
-                    b.ToTable("TripScheduleItems");
-                });
-
             modelBuilder.Entity("TripPlanner.Core.Entities.User", b =>
                 {
                     b.Property<Guid>("Id")
@@ -261,22 +220,9 @@ namespace TripPlanner.Infrastructure.Migrations
                     b.Navigation("User");
                 });
 
-            modelBuilder.Entity("TripPlanner.Core.Entities.TripScheduleItem", b =>
-                {
-                    b.HasOne("TripPlanner.Core.Entities.Trip", "Trip")
-                        .WithMany("ScheduleItems")
-                        .HasForeignKey("TripId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Trip");
-                });
-
             modelBuilder.Entity("TripPlanner.Core.Entities.Trip", b =>
                 {
                     b.Navigation("Participants");
-
-                    b.Navigation("ScheduleItems");
                 });
 
             modelBuilder.Entity("TripPlanner.Core.Entities.User", b =>

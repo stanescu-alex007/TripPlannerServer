@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using TripPlanner.Infrastructure.Data;
@@ -11,9 +12,11 @@ using TripPlanner.Infrastructure.Data;
 namespace TripPlanner.Infrastructure.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260419171122_AddTripScheduleItems")]
+    partial class AddTripScheduleItems
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -159,14 +162,8 @@ namespace TripPlanner.Infrastructure.Migrations
                     b.Property<string>("Description")
                         .HasColumnType("text");
 
-                    b.Property<string>("EndTime")
-                        .HasColumnType("text");
-
                     b.Property<int>("Order")
                         .HasColumnType("integer");
-
-                    b.Property<string>("StartTime")
-                        .HasColumnType("text");
 
                     b.Property<string>("Status")
                         .IsRequired()
