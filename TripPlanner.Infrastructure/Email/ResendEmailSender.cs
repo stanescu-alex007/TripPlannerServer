@@ -47,8 +47,13 @@ public sealed class ResendEmailSender : IEmailSender
 
         if (response.IsSuccessStatusCode)
         {
-            _logger.LogInformation("Sent {Subject} to {Recipient} via Resend.",
-                message.Subject, message.ToAddress);
+            // Log the provider's id: it is the only way to trace a "my email never
+            // arrived" report back to a specific record in the Resend dashboard.
+            var id = await ReadMessageIdAsync(response, ct);
+
+            _logger.LogInformation(
+                "Sent '{Subject}' to {Recipient} via Resend (id: {MessageId}).",
+                message.Subject, message.ToAddress, id ?? "unknown");
             return;
         }
 
@@ -60,5 +65,25 @@ public sealed class ResendEmailSender : IEmailSender
 
         throw new InvalidOperationException(
             $"Resend returned {(int)response.StatusCode} when sending to {message.ToAddress}.");
+    }
+
+    /// <summary>
+    /// Pulls the "id" out of Resend's response. Never throws — failing to read the
+    /// id must not turn a delivered message into a reported failure.
+    /// </summary>
+    private static async Task<string?> ReadMessageIdAsync(HttpResponseMessage response, CancellationToken ct)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+
+            return document.RootElement.TryGetProperty("id", out var id)
+                ? id.GetString()
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 }
