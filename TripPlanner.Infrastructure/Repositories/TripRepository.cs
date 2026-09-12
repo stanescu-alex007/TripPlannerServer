@@ -8,95 +8,148 @@ namespace TripPlanner.Infrastructure.Repositories
     public class TripRepository : ITripRepository
     {
         private readonly AppDbContext _context;
+        private readonly TimeProvider _clock;
 
-        public TripRepository(AppDbContext context)
+        public TripRepository(AppDbContext context, TimeProvider clock)
         {
             _context = context;
+            _clock = clock;
         }
 
-        public async Task<List<Trip>> GetAllByOwnerIdAsync(Guid ownerId)
-        {
-            return await _context.Trips
+        public Task<List<Trip>> GetAccessibleByUserAsync(Guid userId, CancellationToken ct = default) =>
+            _context.Trips
                 .Include(t => t.Participants)
-                    .ThenInclude(p => p.User)
-                .Where(t => t.OwnerId == ownerId)
+                .Where(t => t.OwnerId == userId
+                            || t.Participants.Any(p => p.UserId == userId
+                                                       && p.Status != TripParticipantStatus.Declined))
                 .OrderByDescending(t => t.StartDate)
                 .AsNoTracking()
-                .ToListAsync();
-        }
+                .ToListAsync(ct);
 
-        public async Task<Trip?> GetByIdAsync(Guid id)
-        {
-            return await _context.Trips
-                .AsNoTracking()
-                .FirstOrDefaultAsync(t => t.Id == id);
-        }
+        public Task<Trip?> GetByIdAsync(Guid id, CancellationToken ct = default) =>
+            _context.Trips.AsNoTracking().FirstOrDefaultAsync(t => t.Id == id, ct);
 
-        public async Task<Trip?> GetByIdWithDetailsAsync(Guid id)
-        {
-            return await _context.Trips
+        public Task<Trip?> GetByIdWithDetailsAsync(Guid id, CancellationToken ct = default) =>
+            _context.Trips
                 .Include(t => t.Participants)
-                    .ThenInclude(p => p.User)
                 .AsNoTracking()
-                .FirstOrDefaultAsync(t => t.Id == id);
-        }
+                .FirstOrDefaultAsync(t => t.Id == id, ct);
 
-        public async Task<Trip> CreateAsync(Trip trip)
+        public async Task<Trip> CreateAsync(Trip trip, CancellationToken ct = default)
         {
-            trip.Id = Guid.NewGuid();
-            await _context.Trips.AddAsync(trip);
-            await _context.SaveChangesAsync();
+            await _context.Trips.AddAsync(trip, ct);
+            await _context.SaveChangesAsync(ct);
             return trip;
         }
 
-        public async Task UpdateAsync(Trip trip)
+        public async Task UpdateAsync(Trip trip, CancellationToken ct = default)
         {
-            // Use ExecuteUpdateAsync to avoid graph-tracking issues from AsNoTracking loads.
-            // Only scalar Trip properties are updated — participants are managed separately.
-            await _context.Trips
-                .Where(t => t.Id == trip.Id)
-                .ExecuteUpdateAsync(s => s
-                    .SetProperty(t => t.Name, trip.Name)
-                    .SetProperty(t => t.Location, trip.Location)
-                    .SetProperty(t => t.StartDate, trip.StartDate)
-                    .SetProperty(t => t.EndDate, trip.EndDate)
-                    .SetProperty(t => t.Budget, trip.Budget)
-                    .SetProperty(t => t.TransportType, trip.TransportType)
-                    .SetProperty(t => t.Image, trip.Image)
-                    .SetProperty(t => t.Description, trip.Description));
+            // Attach-and-mark rather than ExecuteUpdate, so the audit interceptor runs and
+            // UpdatedAt is maintained without being restated at every call site.
+            var tracked = await _context.Trips.FirstOrDefaultAsync(t => t.Id == trip.Id, ct);
+            if (tracked is null) return;
+
+            tracked.Name = trip.Name;
+            tracked.Location = trip.Location;
+            tracked.StartDate = trip.StartDate;
+            tracked.EndDate = trip.EndDate;
+            tracked.Budget = trip.Budget;
+            tracked.TransportType = trip.TransportType;
+            tracked.Image = trip.Image;
+            tracked.Description = trip.Description;
+
+            await _context.SaveChangesAsync(ct);
         }
 
-        public async Task DeleteAsync(Trip trip)
+        public async Task DeleteAsync(Guid tripId, CancellationToken ct = default)
         {
-            // Attach before removing in case the entity was loaded with AsNoTracking
-            _context.Trips.Attach(trip);
+            var trip = await _context.Trips
+                .Include(t => t.Participants)
+                .Include(t => t.ScheduleItems)
+                .FirstOrDefaultAsync(t => t.Id == tripId, ct);
+
+            if (trip is null) return;
+
+            // Soft delete means no row is actually removed, so the database's FK cascade
+            // never fires — children have to be marked explicitly or they would linger,
+            // visible to any query that reaches them directly.
+            _context.TripScheduleItems.RemoveRange(trip.ScheduleItems);
+            _context.TripParticipants.RemoveRange(trip.Participants);
             _context.Trips.Remove(trip);
-            await _context.SaveChangesAsync();
+
+            await _context.SaveChangesAsync(ct);
         }
 
-        public async Task AddParticipantAsync(TripParticipant participant)
+        public async Task AddParticipantAsync(TripParticipant participant, CancellationToken ct = default)
         {
-            await _context.TripParticipants.AddAsync(participant);
-            await _context.SaveChangesAsync();
+            await _context.TripParticipants.AddAsync(participant, ct);
+            await _context.SaveChangesAsync(ct);
         }
 
-        public async Task RemoveParticipantAsync(Guid participantId)
+        public async Task UpdateParticipantAsync(TripParticipant participant, CancellationToken ct = default)
+        {
+            _context.TripParticipants.Update(participant);
+            await _context.SaveChangesAsync(ct);
+        }
+
+        public async Task RemoveParticipantAsync(Guid participantId, CancellationToken ct = default)
         {
             var participant = await _context.TripParticipants
-                .FirstOrDefaultAsync(p => p.Id == participantId);
+                .FirstOrDefaultAsync(p => p.Id == participantId, ct);
 
-            if (participant != null)
-            {
-                _context.TripParticipants.Remove(participant);
-                await _context.SaveChangesAsync();
-            }
+            if (participant is null) return;
+
+            _context.TripParticipants.Remove(participant);
+            await _context.SaveChangesAsync(ct);
         }
 
-        public async Task<TripParticipant?> GetParticipantByEmailAsync(Guid tripId, string email)
+        public Task<TripParticipant?> GetParticipantByEmailAsync(
+            Guid tripId, string email, CancellationToken ct = default) =>
+            // Plain equality: callers normalize first, which keeps the unique
+            // (TripId, Email) index usable instead of forcing a scan over lower(Email).
+            _context.TripParticipants
+                .FirstOrDefaultAsync(p => p.TripId == tripId && p.Email == email, ct);
+
+        public async Task SyncParticipantsAsync(
+            Guid tripId, IReadOnlyCollection<TripParticipant> desired, CancellationToken ct = default)
         {
-            return await _context.TripParticipants
-                .FirstOrDefaultAsync(p => p.TripId == tripId &&
-                    p.Email.ToLower() == email.ToLower());
+            var existing = await _context.TripParticipants
+                .Where(p => p.TripId == tripId)
+                .ToListAsync(ct);
+
+            var owner = existing.FirstOrDefault(p => p.Role == TripParticipantRole.Owner);
+            var desiredByEmail = desired.ToDictionary(p => p.Email, StringComparer.OrdinalIgnoreCase);
+
+            foreach (var current in existing)
+            {
+                // The owner row is never touched by a roster edit.
+                if (current.Id == owner?.Id) continue;
+
+                if (desiredByEmail.TryGetValue(current.Email, out var wanted))
+                {
+                    // Still on the trip: update the editable fields but keep Status, so an
+                    // accepted invitation is not silently reset to pending on every save.
+                    current.Nickname = wanted.Nickname;
+                    current.Role = wanted.Role;
+                    current.UserId = wanted.UserId ?? current.UserId;
+
+                    desiredByEmail.Remove(current.Email);
+                }
+                else
+                {
+                    _context.TripParticipants.Remove(current);
+                }
+            }
+
+            // Whatever is left is genuinely new.
+            foreach (var addition in desiredByEmail.Values)
+            {
+                addition.TripId = tripId;
+                await _context.TripParticipants.AddAsync(addition, ct);
+            }
+
+            // One SaveChanges → one transaction for the whole roster change.
+            await _context.SaveChangesAsync(ct);
         }
     }
 }

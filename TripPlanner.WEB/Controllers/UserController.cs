@@ -1,53 +1,52 @@
-﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using System.Security.Claims;
+using TripPlanner.Core.Common;
 using TripPlanner.Core.Interfaces.IServices;
 using TripPlanner.Core.Models;
 
-namespace TripPlanner.WEB.Controllers
+namespace TripPlanner.WEB.Controllers;
+
+[Route("api/[controller]")]
+[Authorize]
+public class UserController : ApiControllerBase
 {
-    [ApiController]
-    [Route("api/[controller]")]
-    [Authorize]
-    public class UserController : ControllerBase
+    private readonly IUserService _users;
+
+    public UserController(IUserService users) => _users = users;
+
+    // GET /api/user/me — 200 · 401 AUTH_UNAUTHENTICATED · 404 USER_NOT_FOUND
+    [HttpGet("me")]
+    public async Task<IActionResult> GetMe(CancellationToken ct)
     {
-        private readonly IUserService _userService;
+        var userId = CurrentUserId;
+        if (userId is null) return Failure(ErrorCodes.Unauthenticated);
 
-        public UserController(IUserService userService)
-        {
-            _userService = userService;
-        }
+        var result = await _users.GetMeAsync(userId.Value, ct);
 
-        // ── GET /api/user/me ───────────────────────────────────────────────
-        [HttpGet("me")]
-        public async Task<IActionResult> GetMe()
-        {
-            var userId = GetUserId();
-            if (userId is null) return Unauthorized();
+        return result.Success ? Ok(result.Data) : Failure(result.Error!);
+    }
 
-            var user = await _userService.GetMeAsync(userId.Value);
-            if (user is null) return NotFound();
+    // PUT /api/user/me — 200 · 400 VALIDATION_FAILED · 401 · 404
+    [HttpPut("me")]
+    public async Task<IActionResult> Update([FromBody] UpdateUserRequest request, CancellationToken ct)
+    {
+        var userId = CurrentUserId;
+        if (userId is null) return Failure(ErrorCodes.Unauthenticated);
 
-            return Ok(user);
-        }
+        var result = await _users.UpdateAsync(userId.Value, request, ct);
 
-        // ── PUT /api/user/update ───────────────────────────────────────────
-        [HttpPut("update")]
-        public async Task<IActionResult> Update([FromBody] UpdateUserRequest request)
-        {
-            var userId = GetUserId();
-            if (userId is null) return Unauthorized();
+        return result.Success ? Ok(result.Data) : Failure(result.Error!);
+    }
 
-            var result = await _userService.UpdateAsync(userId.Value, request);
-            if (!result.Success) return BadRequest(result);
+    // DELETE /api/user/me — 204 · 401 · 404
+    [HttpDelete("me")]
+    public async Task<IActionResult> DeleteAccount(CancellationToken ct)
+    {
+        var userId = CurrentUserId;
+        if (userId is null) return Failure(ErrorCodes.Unauthenticated);
 
-            return Ok(result);
-        }
+        var result = await _users.DeleteAccountAsync(userId.Value, ct);
 
-        private Guid? GetUserId()
-        {
-            var claim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            return Guid.TryParse(claim, out var id) ? id : null;
-        }
+        return result.Success ? NoContent() : Failure(result.Error!);
     }
 }

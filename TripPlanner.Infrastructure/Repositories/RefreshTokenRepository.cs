@@ -1,57 +1,74 @@
-﻿using Microsoft.EntityFrameworkCore;
-using System.Security.Cryptography;
-using System.Text;
+using Microsoft.EntityFrameworkCore;
 using TripPlanner.Core.Entities;
 using TripPlanner.Core.Interfaces.IRepositories;
 using TripPlanner.Infrastructure.Data;
 
 namespace TripPlanner.Infrastructure.Repositories
 {
-
     public class RefreshTokenRepository : IRefreshTokenRepository
     {
         private readonly AppDbContext _context;
+        private readonly TimeProvider _clock;
 
-        public RefreshTokenRepository(AppDbContext context)
+        public RefreshTokenRepository(AppDbContext context, TimeProvider clock)
         {
             _context = context;
+            _clock = clock;
         }
 
-        public async Task CreateAsync(Guid userId, string token, string ip)
+        public Task<RefreshToken?> GetByHashAsync(string tokenHash, CancellationToken ct = default) =>
+            _context.RefreshTokens.FirstOrDefaultAsync(t => t.TokenHash == tokenHash, ct);
+
+        public async Task AddAsync(RefreshToken token, CancellationToken ct = default)
         {
-            var refresh = new RefreshToken
-            {
-                Id = Guid.NewGuid(),
-                UserId = userId,
-                TokenHash = Hash(token),
-                CreatedAt = DateTime.UtcNow,
-                ExpiresAt = DateTime.UtcNow.AddDays(7),
-                CreatedByIp = ip
-            };
-
-            await _context.RefreshTokens.AddAsync(refresh);
-            await _context.SaveChangesAsync();
+            await _context.RefreshTokens.AddAsync(token, ct);
+            await _context.SaveChangesAsync(ct);
         }
 
-        public async Task<RefreshToken?> GetAsync(string token)
+        public async Task RotateAsync(RefreshToken current, RefreshToken replacement, CancellationToken ct = default)
         {
-            var hash = Hash(token);
+            var now = _clock.GetUtcNow().UtcDateTime;
 
-            return await _context.RefreshTokens
-                .FirstOrDefaultAsync(x => x.TokenHash == hash);
+            current.RevokedAt = now;
+            current.RevokedReason = RefreshTokenRevokeReason.Rotated;
+            current.ReplacedByTokenId = replacement.Id;
+
+            await _context.RefreshTokens.AddAsync(replacement, ct);
+
+            // A single SaveChanges — EF wraps both statements in one transaction, so the
+            // old token can never be revoked without the new one being written.
+            await _context.SaveChangesAsync(ct);
         }
 
-        public async Task UpdateAsync(RefreshToken token)
+        public Task<int> RevokeFamilyAsync(Guid familyId, string reason, CancellationToken ct = default)
         {
-            _context.RefreshTokens.Update(token);
-            await _context.SaveChangesAsync();
+            var now = _clock.GetUtcNow().UtcDateTime;
+
+            // ExecuteUpdate skips the change tracker — and therefore the audit
+            // interceptor — so UpdatedAt has to be set explicitly here.
+            return _context.RefreshTokens
+                .Where(t => t.FamilyId == familyId && t.RevokedAt == null)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(t => t.RevokedAt, now)
+                    .SetProperty(t => t.RevokedReason, reason)
+                    .SetProperty(t => t.UpdatedAt, now), ct);
         }
 
-        private string Hash(string token)
+        public Task<int> RevokeAllForUserAsync(Guid userId, string reason, CancellationToken ct = default)
         {
-            using var sha256 = SHA256.Create();
-            var bytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(token));
-            return Convert.ToBase64String(bytes);
+            var now = _clock.GetUtcNow().UtcDateTime;
+
+            return _context.RefreshTokens
+                .Where(t => t.UserId == userId && t.RevokedAt == null)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(t => t.RevokedAt, now)
+                    .SetProperty(t => t.RevokedReason, reason)
+                    .SetProperty(t => t.UpdatedAt, now), ct);
         }
+
+        public Task<int> DeleteExpiredAsync(DateTime cutoff, CancellationToken ct = default) =>
+            _context.RefreshTokens
+                .Where(t => t.ExpiresAt < cutoff)
+                .ExecuteDeleteAsync(ct);
     }
 }

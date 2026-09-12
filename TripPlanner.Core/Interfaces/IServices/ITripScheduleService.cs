@@ -4,10 +4,23 @@ namespace TripPlanner.Core.Interfaces.IServices
 {
     public interface ITripScheduleService
     {
-        Task<List<TripScheduleItemDto>> GetScheduleAsync(Guid tripId);
-        Task<Result<TripScheduleItemDto>> AddItemAsync(Guid tripId, Guid requesterId, CreateScheduleItemRequest request);
-        Task<Result> UpdateItemAsync(Guid itemId, Guid requesterId, UpdateScheduleItemRequest request);
-        Task<Result> UpdateStatusAsync(Guid itemId, Guid requesterId, string status);
-        Task<Result> DeleteItemAsync(Guid itemId, Guid requesterId);
+        /// <summary>
+        /// Reads a trip's schedule. Takes the requester because access is checked here —
+        /// the previous version returned any trip's schedule to any signed-in caller.
+        /// </summary>
+        Task<Result<List<TripScheduleItemDto>>> GetScheduleAsync(
+            Guid tripId, Guid requesterId, CancellationToken ct = default);
+
+        Task<Result<TripScheduleItemDto>> AddItemAsync(
+            Guid tripId, Guid requesterId, CreateScheduleItemRequest request, CancellationToken ct = default);
+
+        Task<Result> UpdateItemAsync(
+            Guid tripId, Guid itemId, Guid requesterId, UpdateScheduleItemRequest request, CancellationToken ct = default);
+
+        Task<Result> UpdateStatusAsync(
+            Guid tripId, Guid itemId, Guid requesterId, string status, CancellationToken ct = default);
+
+        Task<Result> DeleteItemAsync(
+            Guid tripId, Guid itemId, Guid requesterId, CancellationToken ct = default);
     }
 }

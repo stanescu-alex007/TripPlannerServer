@@ -1,21 +1,32 @@
-﻿using Konscious.Security.Cryptography;
 using System.Security.Cryptography;
 using System.Text;
+using Konscious.Security.Cryptography;
 using TripPlanner.Core.Interfaces.IServices;
 
 namespace TripPlanner.BusinessLogic.Services
 {
+    /// <summary>
+    /// Argon2id with a per-password salt. Stored format: <c>v2:{base64 salt}:{base64 hash}</c>.
+    /// </summary>
     public class PasswordService : IPasswordService
     {
         private const int SaltSize = 16;
         private const int HashSize = 32;
-        private const int Iterations = 4;
+        private const int Iterations = 3;
         private const int DegreeOfParallelism = 2;
-        private const int MemorySize = 1024 * 128;
 
-        // Legacy static salt used before per-password salts were introduced.
-        // Kept only for verifying old passwords during migration.
-        private static readonly byte[] LegacySalt = Encoding.UTF8.GetBytes("super-secret-salt");
+        /// <summary>
+        /// 64 MB. Deliberately lower than the previous 128 MB: every login allocates this,
+        /// so with concurrent requests the old setting was an easy way to exhaust memory.
+        /// </summary>
+        private const int MemorySizeKb = 64 * 1024;
+
+        /// <summary>
+        /// Hashed against when the account does not exist, purely to burn the same amount
+        /// of time as a real verification.
+        /// </summary>
+        private static readonly Lazy<string> DummyHash =
+            new(() => new PasswordService().Hash("dummy-password-for-timing-equalisation"));
 
         public string Hash(string password)
         {
@@ -26,34 +37,42 @@ namespace TripPlanner.BusinessLogic.Services
 
         public bool Verify(string password, string storedHash)
         {
-            // New format: "v2:<base64 salt>:<base64 hash>"
-            if (storedHash.StartsWith("v2:"))
+            if (string.IsNullOrEmpty(storedHash)) return false;
+
+            var parts = storedHash.Split(':', 3);
+            if (parts.Length != 3 || parts[0] != "v2") return false;
+
+            try
             {
-                var parts = storedHash.Split(':', 3);
-                if (parts.Length != 3) return false;
-
                 var salt = Convert.FromBase64String(parts[1]);
-                var expectedHash = Convert.FromBase64String(parts[2]);
-                var actualHash = ComputeHash(Encoding.UTF8.GetBytes(password), salt);
-                return CryptographicOperations.FixedTimeEquals(actualHash, expectedHash);
-            }
+                var expected = Convert.FromBase64String(parts[2]);
+                var actual = ComputeHash(Encoding.UTF8.GetBytes(password), salt);
 
-            // Legacy format: plain base64 hash using the static salt
-            var legacyHash = ComputeHash(Encoding.UTF8.GetBytes(password), LegacySalt);
-            return Convert.ToBase64String(legacyHash) == storedHash;
+                return CryptographicOperations.FixedTimeEquals(actual, expected);
+            }
+            catch (FormatException)
+            {
+                return false;
+            }
         }
 
-        private static byte[] ComputeHash(byte[] passwordBytes, byte[] salt)
+        public bool VerifyDummy(string password)
         {
-            var argon2 = new Argon2id(passwordBytes)
+            Verify(password, DummyHash.Value);
+            return false;
+        }
+
+        private static byte[] ComputeHash(byte[] password, byte[] salt)
+        {
+            using var argon2 = new Argon2id(password)
             {
                 Salt = salt,
                 DegreeOfParallelism = DegreeOfParallelism,
                 Iterations = Iterations,
-                MemorySize = MemorySize
+                MemorySize = MemorySizeKb
             };
+
             return argon2.GetBytes(HashSize);
         }
     }
 }
-

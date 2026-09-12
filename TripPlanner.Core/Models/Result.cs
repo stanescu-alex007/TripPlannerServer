@@ -1,39 +1,35 @@
-﻿namespace TripPlanner.Core.Models
+using TripPlanner.Core.Common;
+
+namespace TripPlanner.Core.Models
 {
+    /// <summary>
+    /// Outcome of an operation. On failure it always carries a structured
+    /// <see cref="Common.Error"/> — controllers map <see cref="Common.Error.Type"/>
+    /// to an HTTP status instead of string-matching on messages.
+    /// </summary>
     public class Result
     {
-        public bool Success { get; set; }
-        public string? Message { get; set; }
+        public bool Success { get; init; }
+        public Error? Error { get; init; }
 
-        public static Result Ok()
-        {
-            return new Result { Success = true };
-        }
+        /// <summary>Human-readable message, for logging and as a client fallback.</summary>
+        public string? Message => Error?.Message;
 
-        public static Result Fail(string message)
-        {
-            return new Result
-            {
-                Success = false,
-                Message = message
-            };
-        }
+        public static Result Ok() => new() { Success = true };
+
+        public static Result Fail(Error error) => new() { Success = false, Error = error };
     }
 
     public class Result<T>
     {
-        public bool Success { get; set; }
-        public string? Message { get; set; }
-        public T? Data { get; set; }
+        public bool Success { get; init; }
+        public Error? Error { get; init; }
+        public T? Data { get; init; }
 
-        public static Result<T> Ok(T data)
-        {
-            return new Result<T> { Success = true, Data = data };
-        }
+        public string? Message => Error?.Message;
 
-        public static Result<T> Fail(string message)
-        {
-            return new Result<T> { Success = false, Message = message };
-        }
+        public static Result<T> Ok(T data) => new() { Success = true, Data = data };
+
+        public static Result<T> Fail(Error error) => new() { Success = false, Error = error };
     }
 }

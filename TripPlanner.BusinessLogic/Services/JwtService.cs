@@ -1,51 +1,48 @@
-﻿using System.Security.Claims;
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 using System.Text;
+using Microsoft.IdentityModel.Tokens;
+using TripPlanner.Core.Common;
 using TripPlanner.Core.Entities;
 using TripPlanner.Core.Interfaces.IServices;
-using Microsoft.IdentityModel.Tokens;
-using System.IdentityModel.Tokens.Jwt;
-using Microsoft.Extensions.Configuration;
 
 namespace TripPlanner.BusinessLogic.Services
 {
-  
     public class JwtService : IJwtService
     {
-        private readonly string _secret;
-        private readonly IConfiguration _config;
+        private readonly AuthSettings _settings;
+        private readonly TimeProvider _clock;
 
-        public JwtService(IConfiguration config)
+        public JwtService(AuthSettings settings, TimeProvider clock)
         {
-            _secret = config["Jwt:Key"]!;
-            _config = config;
+            _settings = settings;
+            _clock = clock;
         }
 
         public string GenerateToken(User user)
         {
-            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_secret));
+            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_settings.JwtKey));
+            var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+            var now = _clock.GetUtcNow().UtcDateTime;
 
-            var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
-
-            var claims = new[]
+            var claims = new List<Claim>
             {
-                new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
-                new Claim(ClaimTypes.Email, user.Email)
+                new(ClaimTypes.NameIdentifier, user.Id.ToString()),
+                new(ClaimTypes.Email, user.Email),
+
+                // Unique per token — lets a specific access token be identified in logs.
+                new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
             };
 
             var token = new JwtSecurityToken(
-                issuer: _config["Jwt:Issuer"],
-                audience: _config["Jwt:Audience"],
+                issuer: _settings.JwtIssuer,
+                audience: _settings.JwtAudience,
                 claims: claims,
-                expires: DateTime.UtcNow.AddMinutes(15),
-                signingCredentials: creds
-            );
+                notBefore: now,
+                expires: now.AddMinutes(_settings.AccessTokenMinutes),
+                signingCredentials: credentials);
 
             return new JwtSecurityTokenHandler().WriteToken(token);
-        }
-
-        public string GenerateRefreshToken()
-        {
-            return Convert.ToBase64String(Guid.NewGuid().ToByteArray());
         }
     }
 }

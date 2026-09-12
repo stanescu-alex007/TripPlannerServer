@@ -1,3 +1,5 @@
+using System.Globalization;
+using TripPlanner.Core.Common;
 using TripPlanner.Core.Entities;
 using TripPlanner.Core.Interfaces.IRepositories;
 using TripPlanner.Core.Interfaces.IServices;
@@ -7,139 +9,205 @@ namespace TripPlanner.BusinessLogic.Services
 {
     public class TripScheduleService : ITripScheduleService
     {
-        private readonly ITripScheduleRepository _scheduleRepo;
-        private readonly ITripRepository _tripRepo;
+        private readonly ITripScheduleRepository _schedule;
+        private readonly ITripRepository _trips;
+        private readonly TimeProvider _clock;
 
-        private static readonly HashSet<string> ValidStatuses =
-            new(StringComparer.OrdinalIgnoreCase) { "Pending", "InProgress", "Done", "Canceled" };
-
-        public TripScheduleService(ITripScheduleRepository scheduleRepo, ITripRepository tripRepo)
+        public TripScheduleService(
+            ITripScheduleRepository schedule, ITripRepository trips, TimeProvider clock)
         {
-            _scheduleRepo = scheduleRepo;
-            _tripRepo = tripRepo;
+            _schedule = schedule;
+            _trips = trips;
+            _clock = clock;
         }
 
-        public async Task<List<TripScheduleItemDto>> GetScheduleAsync(Guid tripId)
+        public async Task<Result<List<TripScheduleItemDto>>> GetScheduleAsync(
+            Guid tripId, Guid requesterId, CancellationToken ct = default)
         {
-            var items = await _scheduleRepo.GetByTripIdAsync(tripId);
-            return items.Select(MapToDto).ToList();
+            var trip = await _trips.GetByIdWithDetailsAsync(tripId, ct);
+
+            if (trip is null)
+                return Result<List<TripScheduleItemDto>>.Fail(ErrorCodes.TripNotFound);
+
+            // Anyone on the trip may read the schedule; only managers may change it.
+            if (!TripAccess.CanView(trip, requesterId))
+                return Result<List<TripScheduleItemDto>>.Fail(ErrorCodes.TripForbidden);
+
+            var items = await _schedule.GetByTripIdAsync(tripId, ct);
+
+            return Result<List<TripScheduleItemDto>>.Ok(items.Select(MapToDto).ToList());
         }
 
         public async Task<Result<TripScheduleItemDto>> AddItemAsync(
-            Guid tripId, Guid requesterId, CreateScheduleItemRequest request)
+            Guid tripId, Guid requesterId, CreateScheduleItemRequest request, CancellationToken ct = default)
         {
-            var trip = await _tripRepo.GetByIdAsync(tripId);
-            if (trip is null)
-                return Result<TripScheduleItemDto>.Fail("Trip not found.");
+            var (trip, error) = await LoadForManageAsync(tripId, requesterId, ct);
+            if (error is not null) return Result<TripScheduleItemDto>.Fail(error);
 
-            if (trip.OwnerId != requesterId)
-                return Result<TripScheduleItemDto>.Fail("Only the trip owner can manage the schedule.");
+            if (!TryParseDay(request.Date, out var date))
+                return Result<TripScheduleItemDto>.Fail(ErrorCodes.ValidationFailed);
 
-            // Date must be within trip range (strip time, compare UTC date only)
-            var requestDate = request.Date.Date;
-            var startDate = trip.StartDate.ToUniversalTime().Date;
-            var endDate = trip.EndDate.ToUniversalTime().Date;
+            if (date < trip!.StartDate || date > trip.EndDate)
+                return Result<TripScheduleItemDto>.Fail(ErrorCodes.ScheduleDateOutOfRange);
 
-            if (requestDate < startDate || requestDate > endDate)
-                return Result<TripScheduleItemDto>.Fail(
-                    $"Date must be between {startDate:yyyy-MM-dd} and {endDate:yyyy-MM-dd}.");
+            var times = ParseTimes(request.StartTime, request.EndTime);
+            if (times is null)
+                return Result<TripScheduleItemDto>.Fail(ErrorCodes.ValidationFailed);
 
             var item = new TripScheduleItem
             {
                 TripId = tripId,
-                Date = DateTime.SpecifyKind(requestDate, DateTimeKind.Utc),
-                StartTime = string.IsNullOrWhiteSpace(request.StartTime) ? null : request.StartTime.Trim(),
-                EndTime = string.IsNullOrWhiteSpace(request.EndTime) ? null : request.EndTime.Trim(),
+                Date = date,
+                StartTime = times.Value.Start,
+                EndTime = times.Value.End,
                 Title = request.Title.Trim(),
-                Description = request.Description?.Trim(),
-                Status = "Pending",
-                Order = request.Order,
-                CreatedAt = DateTime.UtcNow
+                Description = string.IsNullOrWhiteSpace(request.Description) ? null : request.Description.Trim(),
+                Status = TripScheduleItemStatus.Pending,
+                Order = request.Order
             };
 
-            var created = await _scheduleRepo.AddAsync(item);
+            var created = await _schedule.AddAsync(item, ct);
+
             return Result<TripScheduleItemDto>.Ok(MapToDto(created));
         }
 
         public async Task<Result> UpdateItemAsync(
-            Guid itemId, Guid requesterId, UpdateScheduleItemRequest request)
+            Guid tripId, Guid itemId, Guid requesterId, UpdateScheduleItemRequest request, CancellationToken ct = default)
         {
-            var item = await _scheduleRepo.GetByIdAsync(itemId);
-            if (item is null)
-                return Result.Fail("Schedule item not found.");
+            var (trip, error) = await LoadForManageAsync(tripId, requesterId, ct);
+            if (error is not null) return Result.Fail(error);
 
-            var trip = await _tripRepo.GetByIdAsync(item.TripId);
-            if (trip is null)
-                return Result.Fail("Trip not found.");
+            var item = await _schedule.GetByIdAsync(itemId, ct);
 
-            if (trip.OwnerId != requesterId)
-                return Result.Fail("Only the trip owner can manage the schedule.");
+            // Checking TripId too stops an item being reached through a trip the caller
+            // happens to own.
+            if (item is null || item.TripId != tripId)
+                return Result.Fail(ErrorCodes.ScheduleItemNotFound);
 
-            var requestDate = request.Date.Date;
-            var startDate = trip.StartDate.ToUniversalTime().Date;
-            var endDate = trip.EndDate.ToUniversalTime().Date;
+            if (!TryParseDay(request.Date, out var date))
+                return Result.Fail(ErrorCodes.ValidationFailed);
 
-            if (requestDate < startDate || requestDate > endDate)
-                return Result.Fail(
-                    $"Date must be between {startDate:yyyy-MM-dd} and {endDate:yyyy-MM-dd}.");
+            if (date < trip!.StartDate || date > trip.EndDate)
+                return Result.Fail(ErrorCodes.ScheduleDateOutOfRange);
 
-            item.Date = DateTime.SpecifyKind(requestDate, DateTimeKind.Utc);
-            item.StartTime = string.IsNullOrWhiteSpace(request.StartTime) ? null : request.StartTime.Trim();
-            item.EndTime = string.IsNullOrWhiteSpace(request.EndTime) ? null : request.EndTime.Trim();
+            var times = ParseTimes(request.StartTime, request.EndTime);
+            if (times is null) return Result.Fail(ErrorCodes.ValidationFailed);
+
+            item.Date = date;
+            item.StartTime = times.Value.Start;
+            item.EndTime = times.Value.End;
             item.Title = request.Title.Trim();
-            item.Description = request.Description?.Trim();
+            item.Description = string.IsNullOrWhiteSpace(request.Description) ? null : request.Description.Trim();
             item.Order = request.Order;
 
-            await _scheduleRepo.UpdateAsync(item);
+            await _schedule.UpdateAsync(item, ct);
             return Result.Ok();
         }
 
-        public async Task<Result> UpdateStatusAsync(Guid itemId, Guid requesterId, string status)
+        public async Task<Result> UpdateStatusAsync(
+            Guid tripId, Guid itemId, Guid requesterId, string status, CancellationToken ct = default)
         {
-            if (!ValidStatuses.Contains(status))
-                return Result.Fail($"Invalid status '{status}'. Valid values: Pending, InProgress, Done, Canceled.");
+            // Map whatever casing the client sent onto the canonical value. The old code
+            // upper-cased only the first letter, turning "inprogress" into "Inprogress" —
+            // a value no consumer recognised.
+            var normalized = TripScheduleItemStatus.Normalize(status);
+            if (normalized is null)
+                return Result.Fail(ErrorCodes.ScheduleStatusInvalid);
 
-            var item = await _scheduleRepo.GetByIdAsync(itemId);
-            if (item is null)
-                return Result.Fail("Schedule item not found.");
+            var (_, error) = await LoadForManageAsync(tripId, requesterId, ct);
+            if (error is not null) return Result.Fail(error);
 
-            var trip = await _tripRepo.GetByIdAsync(item.TripId);
-            if (trip is null)
-                return Result.Fail("Trip not found.");
+            var item = await _schedule.GetByIdAsync(itemId, ct);
+            if (item is null || item.TripId != tripId)
+                return Result.Fail(ErrorCodes.ScheduleItemNotFound);
 
-            if (trip.OwnerId != requesterId)
-                return Result.Fail("Only the trip owner can update schedule status.");
+            item.Status = normalized;
+            await _schedule.UpdateAsync(item, ct);
 
-            // Normalize casing
-            item.Status = char.ToUpper(status[0]) + status[1..];
-            await _scheduleRepo.UpdateAsync(item);
             return Result.Ok();
         }
 
-        public async Task<Result> DeleteItemAsync(Guid itemId, Guid requesterId)
+        public async Task<Result> DeleteItemAsync(
+            Guid tripId, Guid itemId, Guid requesterId, CancellationToken ct = default)
         {
-            var item = await _scheduleRepo.GetByIdAsync(itemId);
-            if (item is null)
-                return Result.Fail("Schedule item not found.");
+            var (_, error) = await LoadForManageAsync(tripId, requesterId, ct);
+            if (error is not null) return Result.Fail(error);
 
-            var trip = await _tripRepo.GetByIdAsync(item.TripId);
-            if (trip is null)
-                return Result.Fail("Trip not found.");
+            var item = await _schedule.GetByIdAsync(itemId, ct);
+            if (item is null || item.TripId != tripId)
+                return Result.Fail(ErrorCodes.ScheduleItemNotFound);
 
-            if (trip.OwnerId != requesterId)
-                return Result.Fail("Only the trip owner can manage the schedule.");
-
-            await _scheduleRepo.DeleteAsync(item);
+            await _schedule.DeleteAsync(item, ct);
             return Result.Ok();
+        }
+
+        // ── Helpers ───────────────────────────────────────────────────────────
+
+        private async Task<(Trip? Trip, Error? Error)> LoadForManageAsync(
+            Guid tripId, Guid requesterId, CancellationToken ct)
+        {
+            var trip = await _trips.GetByIdWithDetailsAsync(tripId, ct);
+
+            if (trip is null) return (null, ErrorCodes.TripNotFound);
+
+            // Hide existence from outsiders; tell insiders they lack the rights.
+            if (!TripAccess.CanView(trip, requesterId)) return (null, ErrorCodes.TripNotFound);
+            if (!TripAccess.CanManage(trip, requesterId)) return (null, ErrorCodes.TripForbidden);
+
+            return (trip, null);
+        }
+
+        /// <summary>
+        /// Parses "yyyy-MM-dd" into UTC midnight. Building the DateTime with
+        /// <c>SpecifyKind</c> instead of converting it is what keeps the stored day equal
+        /// to the day the user picked.
+        /// </summary>
+        private static bool TryParseDay(string value, out DateTime utcMidnight)
+        {
+            if (DateOnly.TryParseExact(value, "yyyy-MM-dd", CultureInfo.InvariantCulture,
+                    DateTimeStyles.None, out var day))
+            {
+                utcMidnight = DateTime.SpecifyKind(day.ToDateTime(TimeOnly.MinValue), DateTimeKind.Utc);
+                return true;
+            }
+
+            utcMidnight = default;
+            return false;
+        }
+
+        /// <summary>Returns null when a value is unparseable or the range is inverted.</summary>
+        private static (TimeOnly? Start, TimeOnly? End)? ParseTimes(string? start, string? end)
+        {
+            TimeOnly? parsedStart = null;
+            TimeOnly? parsedEnd = null;
+
+            if (!string.IsNullOrWhiteSpace(start))
+            {
+                if (!TimeOnly.TryParseExact(start.Trim(), "HH:mm", CultureInfo.InvariantCulture,
+                        DateTimeStyles.None, out var s)) return null;
+                parsedStart = s;
+            }
+
+            if (!string.IsNullOrWhiteSpace(end))
+            {
+                if (!TimeOnly.TryParseExact(end.Trim(), "HH:mm", CultureInfo.InvariantCulture,
+                        DateTimeStyles.None, out var e)) return null;
+                parsedEnd = e;
+            }
+
+            if (parsedStart.HasValue && parsedEnd.HasValue && parsedEnd < parsedStart)
+                return null;
+
+            return (parsedStart, parsedEnd);
         }
 
         private static TripScheduleItemDto MapToDto(TripScheduleItem item) => new()
         {
             Id = item.Id,
             TripId = item.TripId,
-            Date = item.Date,
-            StartTime = item.StartTime,
-            EndTime = item.EndTime,
+            Date = item.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            StartTime = item.StartTime?.ToString("HH:mm", CultureInfo.InvariantCulture),
+            EndTime = item.EndTime?.ToString("HH:mm", CultureInfo.InvariantCulture),
             Title = item.Title,
             Description = item.Description,
             Status = item.Status,

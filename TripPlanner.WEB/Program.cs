@@ -1,40 +1,64 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using TripPlanner.BusinessLogic.DependencyInjection;
 using TripPlanner.Infrastructure.DependencyInjection;
+using TripPlanner.WEB;
 using TripPlanner.WEB.DependencyInjection;
+using TripPlanner.WEB.Middleware;
 
 var builder = WebApplication.CreateBuilder(args);
 
-const string AngularOrigin = "AngularFrontend";
+const string CorsPolicy = "AngularFrontend";
 
-// ── Services ──────────────────────────────────────────────────────────────
+// Validated up front so a bad signing key fails at startup, not on first login.
+var authSettings = BusinessLogicServiceCollectionExtensions.BuildAuthSettings(builder.Configuration);
+
+// ── Services ──────────────────────────────────────────────────────────────────
+
+var allowedOrigins = builder.Configuration
+    .GetSection("Cors:AllowedOrigins")
+    .Get<string[]>() ?? ["http://localhost:4200"];
+
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy(AngularOrigin, policy =>
-    {
-        policy.WithOrigins("http://localhost:4200")
+    options.AddPolicy(CorsPolicy, policy =>
+        policy.WithOrigins(allowedOrigins)
               .AllowAnyHeader()
               .AllowAnyMethod()
-              .AllowCredentials(); // required for HttpOnly cookie refresh tokens
-    });
+              .AllowCredentials()); // needed for the HttpOnly refresh cookie
 });
 
 builder.Services.AddControllers()
     .AddJsonOptions(opts =>
     {
-        // Serialize enums as camelCase strings and keep property names camelCase
-        opts.JsonSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
-        opts.JsonSerializerOptions.DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull;
+        opts.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
+        opts.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
+    })
+    .ConfigureApiBehaviorOptions(options =>
+    {
+        // Model-binding failures must use the same {code, message} envelope as
+        // everything else, instead of the framework's ValidationProblemDetails.
+        options.InvalidModelStateResponseFactory = ApiValidation.BuildResponse;
     });
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerWithAuth();
 
 builder.Services.AddInfrastructure(builder.Configuration);
-builder.Services.AddJwtAuthentication(builder.Configuration);
-builder.Services.AddBusinessLogic();
+builder.Services.AddEmailSending(builder.Configuration);
+builder.Services.AddJwtAuthentication(authSettings);
+builder.Services.AddBusinessLogic(builder.Configuration);
+builder.Services.AddAuthRateLimiting();
 
-// ── Pipeline ──────────────────────────────────────────────────────────────
+builder.Services.AddHostedService<ExpiredTokenCleanupService>();
+
+// ── Pipeline ──────────────────────────────────────────────────────────────────
+
 var app = builder.Build();
+
+// First in the pipeline: turns any unhandled exception into {code, message} and keeps
+// stack traces out of responses.
+app.UseMiddleware<ExceptionHandlingMiddleware>();
 
 if (app.Environment.IsDevelopment())
 {
@@ -42,9 +66,17 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-app.UseHttpsRedirection();
+// HTTPS redirection is deliberately not enabled in development: the launch profile only
+// binds HTTP, so redirecting would send the SPA to a port that is not listening.
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHsts();
+    app.UseHttpsRedirection();
+}
 
-app.UseCors(AngularOrigin);
+app.UseCors(CorsPolicy);
+
+app.UseRateLimiter();
 
 app.UseAuthentication();
 app.UseAuthorization();

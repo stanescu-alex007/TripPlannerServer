@@ -1,11 +1,14 @@
-﻿using TripPlanner.Core.Models;
+using TripPlanner.Core.Models;
 
 namespace TripPlanner.Core.Interfaces.IServices
 {
     public interface IUserService
     {
-        Task<UserDto?> GetMeAsync(Guid userId);
-        Task<Result> UpdateAsync(Guid userId, UpdateUserRequest request);
-    }
+        Task<Result<UserDto>> GetMeAsync(Guid userId, CancellationToken ct = default);
 
+        Task<Result<UserDto>> UpdateAsync(Guid userId, UpdateUserRequest request, CancellationToken ct = default);
+
+        /// <summary>Soft-deletes the account and revokes every session.</summary>
+        Task<Result> DeleteAccountAsync(Guid userId, CancellationToken ct = default);
+    }
 }
