@@ -260,7 +260,7 @@ namespace TripPlanner.BusinessLogic.Services
 
                 var link = $"{_settings.FrontendBaseUrl.TrimEnd('/')}/auth/reset-password?token={raw}";
 
-                await _email.SendAsync(
+                await TrySendAsync(
                     AuthEmailTemplates.PasswordReset(user, link, _settings.PasswordResetMinutes), ct);
             }
 
@@ -412,8 +412,32 @@ namespace TripPlanner.BusinessLogic.Services
 
             var link = $"{_settings.FrontendBaseUrl.TrimEnd('/')}/auth/verify-email?token={raw}";
 
-            await _email.SendAsync(
+            await TrySendAsync(
                 AuthEmailTemplates.VerifyEmail(user, link, _settings.EmailVerificationHours), ct);
+        }
+
+        /// <summary>
+        /// Sends without letting a mail failure fail the operation.
+        /// <para>
+        /// The account or the token has already been written by this point, so throwing
+        /// would report failure for work that actually succeeded — leaving a registered
+        /// user who can neither sign in nor register again. The token stays valid and
+        /// resend-verification / forgot-password can issue a fresh mail.
+        /// </para>
+        /// </summary>
+        private async Task TrySendAsync(EmailMessage message, CancellationToken ct)
+        {
+            try
+            {
+                await _email.SendAsync(message, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "Could not deliver '{Subject}' to {Recipient}. The operation itself succeeded; " +
+                    "the user can request a new link.",
+                    message.Subject, message.ToAddress);
+            }
         }
     }
 }
