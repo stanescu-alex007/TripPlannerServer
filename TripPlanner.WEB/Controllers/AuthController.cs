@@ -15,11 +15,13 @@ public class AuthController : ApiControllerBase
 
     private readonly IAuthService _auth;
     private readonly IWebHostEnvironment _env;
+    private readonly IConfiguration _config;
 
-    public AuthController(IAuthService auth, IWebHostEnvironment env)
+    public AuthController(IAuthService auth, IWebHostEnvironment env, IConfiguration config)
     {
         _auth = auth;
         _env = env;
+        _config = config;
     }
 
     // ── POST /api/auth/register ───────────────────────────────────────────────
@@ -65,13 +67,43 @@ public class AuthController : ApiControllerBase
     }
 
     // ── POST /api/auth/login ──────────────────────────────────────────────────
-    // 200 · 401 AUTH_INVALID_CREDENTIALS · 403 AUTH_EMAIL_NOT_VERIFIED
-    // 429 AUTH_TOO_MANY_ATTEMPTS
+    // 200 tokens, or 200 {requiresTwoFactor, challengeToken} when 2FA is on
+    // 401 AUTH_INVALID_CREDENTIALS · 403 AUTH_EMAIL_NOT_VERIFIED
+    // 429 AUTH_TOO_MANY_ATTEMPTS | AUTH_LOGIN_THROTTLED
     [HttpPost("login")]
     [EnableRateLimiting(RateLimitPolicies.Login)]
     public async Task<IActionResult> Login([FromBody] LoginRequest request, CancellationToken ct)
     {
         var result = await _auth.LoginAsync(request, RequestContext, ct);
+
+        if (!result.Success) return Failure(result.Error!);
+
+        var outcome = result.Data!;
+
+        // A pending second factor is a step, not a failure — 200 with what to do next,
+        // so the client is not left guessing from an error code.
+        if (outcome.RequiresTwoFactor)
+        {
+            return Ok(new
+            {
+                requiresTwoFactor = true,
+                challengeToken = outcome.ChallengeToken
+            });
+        }
+
+        return Ok(IssueTokens(outcome.Tokens!));
+    }
+
+    // ── POST /api/auth/2fa ────────────────────────────────────────────────────
+    // Completes a sign-in with an authenticator code or a recovery code.
+    // 200 · 400 AUTH_2FA_CODE_INVALID · 401 AUTH_2FA_CHALLENGE_INVALID
+    [HttpPost("2fa")]
+    [EnableRateLimiting(RateLimitPolicies.Login)]
+    public async Task<IActionResult> CompleteTwoFactor(
+        [FromBody] TwoFactorLoginRequest request, CancellationToken ct)
+    {
+        var result = await _auth.CompleteTwoFactorAsync(
+            request.ChallengeToken, request.Code, RequestContext, ct);
 
         if (!result.Success) return Failure(result.Error!);
 
@@ -184,20 +216,35 @@ public class AuthController : ApiControllerBase
     private void ClearRefreshCookie() =>
         Response.Cookies.Delete(RefreshCookie, BuildCookieOptions(DateTime.UtcNow.AddDays(-1)));
 
-    private CookieOptions BuildCookieOptions(DateTimeOffset expires) => new()
+    private CookieOptions BuildCookieOptions(DateTimeOffset expires)
     {
-        HttpOnly = true,
+        // Strict works while the SPA and the API share a site. Once they live on
+        // different domains the browser stops sending the cookie altogether and refresh
+        // silently dies — which is why this is configuration, not a constant.
+        // Cross-site ("None") is only honoured on HTTPS.
+        var configured = _config["Cookies:SameSite"];
 
-        // Dev runs over plain HTTP, where a Secure cookie would simply not be stored.
-        Secure = !_env.IsDevelopment(),
+        var sameSite = configured?.ToLowerInvariant() switch
+        {
+            "none" => SameSiteMode.None,
+            "lax" => SameSiteMode.Lax,
+            _ => SameSiteMode.Strict
+        };
 
-        // Strict is safe here because the SPA calls the API directly rather than being
-        // navigated to it from elsewhere.
-        SameSite = SameSiteMode.Strict,
+        return new CookieOptions
+        {
+            HttpOnly = true,
 
-        // Scoped to the auth endpoints — no other request needs to carry it.
-        Path = "/api/auth",
+            // Dev runs over plain HTTP, where a Secure cookie would not be stored at
+            // all. SameSite=None additionally requires it.
+            Secure = !_env.IsDevelopment() || sameSite == SameSiteMode.None,
 
-        Expires = expires
-    };
+            SameSite = sameSite,
+
+            // Scoped to the auth endpoints — no other request needs to carry it.
+            Path = "/api/auth",
+
+            Expires = expires
+        };
+    }
 }

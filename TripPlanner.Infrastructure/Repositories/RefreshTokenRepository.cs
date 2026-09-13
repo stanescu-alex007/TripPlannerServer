@@ -70,5 +70,54 @@ namespace TripPlanner.Infrastructure.Repositories
             _context.RefreshTokens
                 .Where(t => t.ExpiresAt < cutoff)
                 .ExecuteDeleteAsync(ct);
+
+        public async Task<List<RefreshToken>> GetActiveSessionsAsync(
+            Guid userId, CancellationToken ct = default)
+        {
+            var now = _clock.GetUtcNow().UtcDateTime;
+
+            // A family is a chain of rotated tokens; only its newest live link
+            // represents the session, so the rest would show as duplicate devices.
+            var live = await _context.RefreshTokens
+                .Where(t => t.UserId == userId && t.RevokedAt == null && t.ExpiresAt > now)
+                .AsNoTracking()
+                .ToListAsync(ct);
+
+            return live
+                .GroupBy(t => t.FamilyId)
+                .Select(family => family.OrderByDescending(t => t.CreatedAt).First())
+                .OrderByDescending(t => t.CreatedAt)
+                .ToList();
+        }
+
+        public async Task<bool> RevokeFamilyForUserAsync(
+            Guid userId, Guid familyId, string reason, CancellationToken ct = default)
+        {
+            var now = _clock.GetUtcNow().UtcDateTime;
+
+            // Filtering on UserId as well as FamilyId is what stops one user ending
+            // another user's session by guessing an id.
+            var affected = await _context.RefreshTokens
+                .Where(t => t.UserId == userId && t.FamilyId == familyId && t.RevokedAt == null)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(t => t.RevokedAt, now)
+                    .SetProperty(t => t.RevokedReason, reason)
+                    .SetProperty(t => t.UpdatedAt, now), ct);
+
+            return affected > 0;
+        }
+
+        public Task<int> RevokeAllExceptFamilyAsync(
+            Guid userId, Guid keepFamilyId, string reason, CancellationToken ct = default)
+        {
+            var now = _clock.GetUtcNow().UtcDateTime;
+
+            return _context.RefreshTokens
+                .Where(t => t.UserId == userId && t.FamilyId != keepFamilyId && t.RevokedAt == null)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(t => t.RevokedAt, now)
+                    .SetProperty(t => t.RevokedReason, reason)
+                    .SetProperty(t => t.UpdatedAt, now), ct);
+        }
     }
 }

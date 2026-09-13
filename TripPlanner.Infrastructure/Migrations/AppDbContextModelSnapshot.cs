@@ -22,6 +22,57 @@ namespace TripPlanner.Infrastructure.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("TripPlanner.Core.Entities.ExternalLogin", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DisplayName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime?>("LastLoginAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("PictureUrl")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.Property<string>("ProviderEmail")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("ProviderKey")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Provider", "ProviderKey")
+                        .IsUnique();
+
+                    b.HasIndex("UserId", "Provider")
+                        .IsUnique();
+
+                    b.ToTable("ExternalLogins");
+                });
+
             modelBuilder.Entity("TripPlanner.Core.Entities.RefreshToken", b =>
                 {
                     b.Property<Guid>("Id")
@@ -285,6 +336,9 @@ namespace TripPlanner.Infrastructure.Migrations
                     b.Property<DateTime?>("EmailVerifiedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<int>("FailedLoginAttempts")
+                        .HasColumnType("integer");
+
                     b.Property<string>("FirstName")
                         .IsRequired()
                         .HasMaxLength(100)
@@ -293,6 +347,9 @@ namespace TripPlanner.Infrastructure.Migrations
                     b.Property<string>("ImageUrl")
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime?>("LastFailedLoginAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("LastName")
                         .IsRequired()
@@ -303,13 +360,19 @@ namespace TripPlanner.Infrastructure.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("PasswordHash")
-                        .IsRequired()
                         .HasMaxLength(512)
                         .HasColumnType("character varying(512)");
 
                     b.Property<string>("Phone")
                         .HasMaxLength(30)
                         .HasColumnType("character varying(30)");
+
+                    b.Property<DateTime?>("TwoFactorEnabledAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("TwoFactorSecret")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -320,6 +383,36 @@ namespace TripPlanner.Infrastructure.Migrations
                         .IsUnique();
 
                     b.ToTable("Users");
+                });
+
+            modelBuilder.Entity("TripPlanner.Core.Entities.UserRecoveryCode", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CodeHash")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("UsedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("UserRecoveryCodes");
                 });
 
             modelBuilder.Entity("TripPlanner.Core.Entities.UserToken", b =>
@@ -336,6 +429,10 @@ namespace TripPlanner.Infrastructure.Migrations
 
                     b.Property<DateTime?>("InvalidatedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("NewEmail")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
 
                     b.Property<string>("Purpose")
                         .IsRequired()
@@ -367,8 +464,19 @@ namespace TripPlanner.Infrastructure.Migrations
 
                     b.ToTable("UserTokens", t =>
                         {
-                            t.HasCheckConstraint("CK_UserTokens_Purpose", "\"Purpose\" IN ('email-verification','password-reset')");
+                            t.HasCheckConstraint("CK_UserTokens_Purpose", "\"Purpose\" IN ('email-verification','password-reset','email-change','two-factor-challenge')");
                         });
+                });
+
+            modelBuilder.Entity("TripPlanner.Core.Entities.ExternalLogin", b =>
+                {
+                    b.HasOne("TripPlanner.Core.Entities.User", "User")
+                        .WithMany("ExternalLogins")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("TripPlanner.Core.Entities.RefreshToken", b =>
@@ -429,6 +537,17 @@ namespace TripPlanner.Infrastructure.Migrations
                     b.Navigation("Trip");
                 });
 
+            modelBuilder.Entity("TripPlanner.Core.Entities.UserRecoveryCode", b =>
+                {
+                    b.HasOne("TripPlanner.Core.Entities.User", "User")
+                        .WithMany("RecoveryCodes")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("TripPlanner.Core.Entities.UserToken", b =>
                 {
                     b.HasOne("TripPlanner.Core.Entities.User", "User")
@@ -449,7 +568,11 @@ namespace TripPlanner.Infrastructure.Migrations
 
             modelBuilder.Entity("TripPlanner.Core.Entities.User", b =>
                 {
+                    b.Navigation("ExternalLogins");
+
                     b.Navigation("OwnedTrips");
+
+                    b.Navigation("RecoveryCodes");
 
                     b.Navigation("RefreshTokens");
 

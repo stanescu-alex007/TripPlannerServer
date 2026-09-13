@@ -35,6 +35,14 @@ public abstract class ApiControllerBase : ControllerBase
     protected Guid? CurrentUserId =>
         Guid.TryParse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) ? id : null;
 
+    /// <summary>
+    /// Which session the caller is using, from the access token's "sid" claim. Lets a
+    /// request recognise its own session without the refresh cookie, which is scoped to
+    /// /api/auth and never reaches these endpoints.
+    /// </summary>
+    protected Guid? CurrentSessionId =>
+        Guid.TryParse(User.FindFirst("sid")?.Value, out var id) ? id : null;
+
     protected RequestContext RequestContext => new(
         IpAddress: HttpContext.Connection.RemoteIpAddress?.ToString(),
         UserAgent: Request.Headers.UserAgent.ToString() is { Length: > 0 } ua

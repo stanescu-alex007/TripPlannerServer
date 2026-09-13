@@ -32,6 +32,7 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
         services.AddScoped<IUserTokenRepository, UserTokenRepository>();
+        services.AddScoped<IUserRecoveryCodeRepository, UserRecoveryCodeRepository>();
         services.AddScoped<ITripRepository, TripRepository>();
         services.AddScoped<ITripScheduleRepository, TripScheduleRepository>();
 

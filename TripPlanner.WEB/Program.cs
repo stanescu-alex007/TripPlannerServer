@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.HttpOverrides;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using TripPlanner.BusinessLogic.DependencyInjection;
@@ -52,11 +53,28 @@ builder.Services.AddAuthRateLimiting();
 
 builder.Services.AddHostedService<ExpiredTokenCleanupService>();
 
+// Behind a reverse proxy every request appears to come from the proxy. Without this
+// the rate limiter partitions all callers into one bucket, so they throttle each
+// other, and every session is recorded against the proxy's address.
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+
+    // Cleared because the defaults only trust loopback; the real proxy addresses
+    // belong in configuration for the environment that has them.
+    options.KnownNetworks.Clear();
+    options.KnownProxies.Clear();
+});
+
 // ── Pipeline ──────────────────────────────────────────────────────────────────
 
 var app = builder.Build();
 
-// First in the pipeline: turns any unhandled exception into {code, message} and keeps
+// Must run before anything that reads the client's address — rate limiting, logging,
+// and the IP recorded on a session.
+app.UseForwardedHeaders();
+
+// Then the catch-all: turns any unhandled exception into {code, message} and keeps
 // stack traces out of responses.
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 

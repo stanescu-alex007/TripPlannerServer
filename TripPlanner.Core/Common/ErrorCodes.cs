@@ -99,9 +99,85 @@ public static class ErrorCodes
         "Password does not meet the minimum requirements.",
         ErrorType.Validation);
 
+    public static readonly Error PasswordTooCommon = new(
+        "AUTH_PASSWORD_TOO_COMMON",
+        "That password is among the most commonly used ones. Please pick another.",
+        ErrorType.Validation);
+
+    public static readonly Error PasswordContainsPersonalInfo = new(
+        "AUTH_PASSWORD_PERSONAL_INFO",
+        "Your password should not contain your name or email address.",
+        ErrorType.Validation);
+
+    /// <summary>The account has no password — it signs in through an external provider.</summary>
+    public static readonly Error PasswordNotSet = new(
+        "AUTH_PASSWORD_NOT_SET",
+        "This account signs in with an external provider and has no password.",
+        ErrorType.Validation);
+
     public static readonly Error PasswordSameAsCurrent = new(
         "AUTH_PASSWORD_SAME_AS_CURRENT",
         "The new password must be different from the current one.",
+        ErrorType.Validation);
+
+    // ── Two-factor ────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Credentials were correct, but a 2FA code is still required. Carries the
+    /// challenge the client must complete — not a failure the user should see as one.
+    /// </summary>
+    public static readonly Error TwoFactorRequired = new(
+        "AUTH_2FA_REQUIRED",
+        "Enter the code from your authenticator app.",
+        ErrorType.Unauthenticated);
+
+    public static readonly Error TwoFactorCodeInvalid = new(
+        "AUTH_2FA_CODE_INVALID",
+        "That code is not valid. Codes change every 30 seconds.",
+        ErrorType.Validation);
+
+    public static readonly Error TwoFactorChallengeInvalid = new(
+        "AUTH_2FA_CHALLENGE_INVALID",
+        "This sign-in attempt has expired. Please start again.",
+        ErrorType.Unauthenticated);
+
+    public static readonly Error TwoFactorAlreadyEnabled = new(
+        "AUTH_2FA_ALREADY_ENABLED",
+        "Two-factor authentication is already switched on.",
+        ErrorType.Conflict);
+
+    public static readonly Error TwoFactorNotEnabled = new(
+        "AUTH_2FA_NOT_ENABLED",
+        "Two-factor authentication is not switched on for this account.",
+        ErrorType.Validation);
+
+    public static readonly Error TwoFactorSetupMissing = new(
+        "AUTH_2FA_SETUP_MISSING",
+        "Start the setup again — the previous attempt is no longer valid.",
+        ErrorType.Validation);
+
+    public static readonly Error RecoveryCodeInvalid = new(
+        "AUTH_RECOVERY_CODE_INVALID",
+        "That recovery code is not valid or has already been used.",
+        ErrorType.Validation);
+
+    // ── Throttling ────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Too many failed attempts on this specific account; the next try has to wait.
+    /// Distinct from the IP-based limit, which an attacker can dodge by rotating
+    /// addresses.
+    /// </summary>
+    public static readonly Error LoginThrottled = new(
+        "AUTH_LOGIN_THROTTLED",
+        "Too many failed attempts. Please wait a few seconds and try again.",
+        ErrorType.TooManyRequests);
+
+    // ── Email change ──────────────────────────────────────────────────────────
+
+    public static readonly Error EmailUnchanged = new(
+        "AUTH_EMAIL_UNCHANGED",
+        "That is already your email address.",
         ErrorType.Validation);
 
     // ── One-time tokens (email verification / password reset) ─────────────────
@@ -131,6 +207,15 @@ public static class ErrorCodes
     public static readonly Error UserNotFound = new(
         "USER_NOT_FOUND",
         "User not found.",
+        ErrorType.NotFound);
+
+    /// <summary>
+    /// Also returned when the session belongs to someone else — telling the two apart
+    /// would confirm that a guessed id exists.
+    /// </summary>
+    public static readonly Error NotFoundSession = new(
+        "SESSION_NOT_FOUND",
+        "That session no longer exists.",
         ErrorType.NotFound);
 
     public static readonly Error Internal = new(

@@ -30,5 +30,19 @@ namespace TripPlanner.Core.Interfaces.IRepositories
 
         /// <summary>Permanently removes rows that expired before <paramref name="cutoff"/>.</summary>
         Task<int> DeleteExpiredAsync(DateTime cutoff, CancellationToken ct = default);
+
+        /// <summary>
+        /// One row per live session: the newest still-valid token of each family, which
+        /// is what the user thinks of as "a device I am signed in on".
+        /// </summary>
+        Task<List<RefreshToken>> GetActiveSessionsAsync(Guid userId, CancellationToken ct = default);
+
+        /// <summary>Revokes one family, but only if it belongs to this user.</summary>
+        Task<bool> RevokeFamilyForUserAsync(
+            Guid userId, Guid familyId, string reason, CancellationToken ct = default);
+
+        /// <summary>Revokes every family except the one given — "sign out everywhere else".</summary>
+        Task<int> RevokeAllExceptFamilyAsync(
+            Guid userId, Guid keepFamilyId, string reason, CancellationToken ct = default);
     }
 }

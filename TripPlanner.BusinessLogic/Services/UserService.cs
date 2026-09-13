@@ -72,6 +72,7 @@ namespace TripPlanner.BusinessLogic.Services
             ImageUrl = user.ImageUrl,
             BirthDate = user.BirthDate,
             IsEmailVerified = user.IsEmailVerified,
+            IsTwoFactorEnabled = user.IsTwoFactorEnabled,
             CreatedAt = user.CreatedAt
         };
     }

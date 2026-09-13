@@ -32,6 +32,31 @@ public sealed class AuthSettings
     public int PasswordMinLength { get; init; } = 8;
     public int PasswordMaxLength { get; init; } = 200;
 
+    // ── Failed sign-in throttling ─────────────────────────────────────────────
+
+    /// <summary>Failures allowed before the delay starts growing.</summary>
+    public int LoginFailuresBeforeDelay { get; init; } = 5;
+
+    /// <summary>
+    /// Base delay in seconds, doubled per failure past the threshold. Deliberately a
+    /// delay and not a lockout: a lockout lets anyone who knows an address keep its
+    /// owner permanently locked out, while a delay only penalises the attacker.
+    /// </summary>
+    public int LoginDelayBaseSeconds { get; init; } = 1;
+
+    /// <summary>Ceiling on the delay, so a forgotten password is not a half-hour wait.</summary>
+    public int LoginDelayMaxSeconds { get; init; } = 60;
+
+    // ── Two-factor ────────────────────────────────────────────────────────────
+
+    /// <summary>How long the post-password challenge stays completable.</summary>
+    public int TwoFactorChallengeMinutes { get; init; } = 5;
+
+    public int RecoveryCodeCount { get; init; } = 10;
+
+    // ── Email change ──────────────────────────────────────────────────────────
+    public int EmailChangeHours { get; init; } = 2;
+
     // ── Links inside emails ───────────────────────────────────────────────────
     public string FrontendBaseUrl { get; init; } = "http://localhost:4200";
 }

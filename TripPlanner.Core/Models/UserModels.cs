@@ -12,6 +12,9 @@ namespace TripPlanner.Core.Models
         public string? ImageUrl { get; set; }
         public DateTime? BirthDate { get; set; }
         public bool IsEmailVerified { get; set; }
+
+        /// <summary>Lets the UI show the right state without a second call.</summary>
+        public bool IsTwoFactorEnabled { get; set; }
         public DateTime CreatedAt { get; set; }
     }
 

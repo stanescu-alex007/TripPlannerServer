@@ -15,6 +15,8 @@ public class AppDbContext : DbContext
     public DbSet<TripScheduleItem> TripScheduleItems => Set<TripScheduleItem>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<UserToken> UserTokens => Set<UserToken>();
+    public DbSet<UserRecoveryCode> UserRecoveryCodes => Set<UserRecoveryCode>();
+    public DbSet<ExternalLogin> ExternalLogins => Set<ExternalLogin>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -30,7 +32,10 @@ public class AppDbContext : DbContext
             entity.Property(u => u.Email).HasMaxLength(256).IsRequired();
             entity.Property(u => u.Phone).HasMaxLength(30);
             entity.Property(u => u.ImageUrl).HasMaxLength(500);
-            entity.Property(u => u.PasswordHash).HasMaxLength(512).IsRequired();
+            // Optional: an account that only signs in through an external provider
+            // has no password at all.
+            entity.Property(u => u.PasswordHash).HasMaxLength(512);
+            entity.Property(u => u.TwoFactorSecret).HasMaxLength(128);
 
             // The application lower-cases before writing, so a plain unique index is
             // enough and — unlike a lower(Email) expression index — stays usable by
@@ -175,6 +180,7 @@ public class AppDbContext : DbContext
 
             entity.Property(t => t.TokenHash).HasMaxLength(64).IsRequired();
             entity.Property(t => t.Purpose).HasMaxLength(50).IsRequired();
+            entity.Property(t => t.NewEmail).HasMaxLength(256);
 
             entity.HasOne(t => t.User)
                   .WithMany(u => u.UserTokens)
@@ -187,9 +193,50 @@ public class AppDbContext : DbContext
 
             entity.ToTable(t => t.HasCheckConstraint(
                 "CK_UserTokens_Purpose",
-                "\"Purpose\" IN ('email-verification','password-reset')"));
+                "\"Purpose\" IN ('email-verification','password-reset','email-change','two-factor-challenge')"));
 
             entity.HasQueryFilter(t => t.User.DeletedAt == null);
+        });
+
+        // ── UserRecoveryCode ──────────────────────────────────────────────────
+        modelBuilder.Entity<UserRecoveryCode>(entity =>
+        {
+            entity.HasKey(c => c.Id);
+
+            entity.Property(c => c.CodeHash).HasMaxLength(512).IsRequired();
+
+            entity.HasOne(c => c.User)
+                  .WithMany(u => u.RecoveryCodes)
+                  .HasForeignKey(c => c.UserId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(c => c.UserId);
+            entity.HasQueryFilter(c => c.User.DeletedAt == null);
+        });
+
+        // ── ExternalLogin ─────────────────────────────────────────────────────
+        modelBuilder.Entity<ExternalLogin>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            entity.Property(e => e.Provider).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.ProviderKey).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.ProviderEmail).HasMaxLength(256);
+            entity.Property(e => e.DisplayName).HasMaxLength(200);
+            entity.Property(e => e.PictureUrl).HasMaxLength(500);
+
+            entity.HasOne(e => e.User)
+                  .WithMany(u => u.ExternalLogins)
+                  .HasForeignKey(e => e.UserId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            // One identity at a provider maps to exactly one account.
+            entity.HasIndex(e => new { e.Provider, e.ProviderKey }).IsUnique();
+
+            // And an account links a given provider at most once.
+            entity.HasIndex(e => new { e.UserId, e.Provider }).IsUnique();
+
+            entity.HasQueryFilter(e => e.User.DeletedAt == null);
         });
     }
 }

@@ -16,6 +16,7 @@ namespace TripPlanner.BusinessLogic.DependencyInjection
 
             // Services
             services.AddScoped<IAuthService, AuthService>();
+            services.AddScoped<IAccountSecurityService, AccountSecurityService>();
             services.AddScoped<IUserService, UserService>();
             services.AddScoped<ITripService, TripService>();
             services.AddScoped<ITripScheduleService, TripScheduleService>();
@@ -23,6 +24,7 @@ namespace TripPlanner.BusinessLogic.DependencyInjection
             // Helpers
             services.AddSingleton<IPasswordService, PasswordService>();
             services.AddSingleton<ISecureTokenService, SecureTokenService>();
+            services.AddSingleton<ITwoFactorService, TwoFactorService>();
             services.AddScoped<IJwtService, JwtService>();
 
             return services;
