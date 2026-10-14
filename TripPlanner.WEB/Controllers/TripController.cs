@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using TripPlanner.Core.Common;
 using TripPlanner.Core.Interfaces.IServices;
 using TripPlanner.Core.Models;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace TripPlanner.WEB.Controllers;
 
@@ -11,8 +12,13 @@ namespace TripPlanner.WEB.Controllers;
 public class TripController : ApiControllerBase
 {
     private readonly ITripService _trips;
+    private readonly ITripInvitationService _invitations;
 
-    public TripController(ITripService trips) => _trips = trips;
+    public TripController(ITripService trips, ITripInvitationService invitations)
+    {
+        _trips = trips;
+        _invitations = invitations;
+    }
 
     // GET /api/trip — trips owned by, or shared with, the caller
     [HttpGet]
@@ -74,6 +80,41 @@ public class TripController : ApiControllerBase
         return result.Success ? NoContent() : Failure(result.Error!);
     }
 
+    // GET /api/trip/deleted — trips the caller deleted, still restorable
+    [HttpGet("deleted")]
+    public async Task<IActionResult> GetDeleted(CancellationToken ct)
+    {
+        var userId = CurrentUserId;
+        if (userId is null) return Failure(ErrorCodes.Unauthenticated);
+
+        return Ok(await _trips.GetDeletedTripsAsync(userId.Value, ct));
+    }
+
+    // POST /api/trip/{id}/restore — 200 · 404 TRIP_NOT_FOUND
+    [HttpPost("{id:guid}/restore")]
+    public async Task<IActionResult> Restore(Guid id, CancellationToken ct)
+    {
+        var userId = CurrentUserId;
+        if (userId is null) return Failure(ErrorCodes.Unauthenticated);
+
+        var result = await _trips.RestoreTripAsync(id, userId.Value, ct);
+
+        return result.Success ? Ok(new { message = "Trip restored." }) : Failure(result.Error!);
+    }
+
+    // POST /api/trip/{id}/leave — 204 · 404 TRIP_NOT_FOUND | PARTICIPANT_NOT_FOUND
+    // 409 TRIP_OWNER_CANNOT_LEAVE
+    [HttpPost("{id:guid}/leave")]
+    public async Task<IActionResult> Leave(Guid id, CancellationToken ct)
+    {
+        var userId = CurrentUserId;
+        if (userId is null) return Failure(ErrorCodes.Unauthenticated);
+
+        var result = await _trips.LeaveTripAsync(id, userId.Value, ct);
+
+        return result.Success ? NoContent() : Failure(result.Error!);
+    }
+
     // POST /api/trip/{id}/participants — 201 · 409 PARTICIPANT_ALREADY_EXISTS
     [HttpPost("{id:guid}/participants")]
     public async Task<IActionResult> AddParticipant(
@@ -86,6 +127,22 @@ public class TripController : ApiControllerBase
 
         return result.Success
             ? StatusCode(StatusCodes.Status201Created, new { message = "Participant added." })
+            : Failure(result.Error!);
+    }
+
+    // POST /api/trip/{id}/participants/{participantId}/resend
+    // 200 · 409 INVITATION_ALREADY_ANSWERED · 429 INVITATION_SEND_TOO_SOON
+    [HttpPost("{id:guid}/participants/{participantId:guid}/resend")]
+    [EnableRateLimiting(RateLimitPolicies.Sensitive)]
+    public async Task<IActionResult> ResendInvitation(Guid id, Guid participantId, CancellationToken ct)
+    {
+        var userId = CurrentUserId;
+        if (userId is null) return Failure(ErrorCodes.Unauthenticated);
+
+        var result = await _invitations.ResendAsync(id, participantId, userId.Value, ct);
+
+        return result.Success
+            ? Ok(new { message = "Invitation sent again." })
             : Failure(result.Error!);
     }
 

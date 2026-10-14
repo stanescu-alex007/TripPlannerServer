@@ -35,8 +35,10 @@ namespace TripPlanner.BusinessLogic.Services
             return new TwoFactorSetup(secret, uri);
         }
 
-        public bool VerifyCode(string secret, string code)
+        public bool VerifyCode(string secret, string code, out long timeStep)
         {
+            timeStep = 0;
+
             if (string.IsNullOrWhiteSpace(secret) || string.IsNullOrWhiteSpace(code))
                 return false;
 
@@ -50,7 +52,7 @@ namespace TripPlanner.BusinessLogic.Services
 
                 return totp.VerifyTotp(
                     normalized,
-                    out _,
+                    out timeStep,
                     new VerificationWindow(
                         previous: VerificationWindowSteps,
                         future: VerificationWindowSteps));

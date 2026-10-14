@@ -35,6 +35,7 @@ public sealed class FileEmailSender : IEmailSender
             <div style="font:14px system-ui;background:#f6f6f6;padding:12px;margin-bottom:16px">
               <b>To:</b> {message.ToAddress}<br>
               <b>From:</b> {_options.FromName} &lt;{_options.FromAddress}&gt;<br>
+              <b>Reply-To:</b> {message.ReplyTo ?? "-"}<br>
               <b>Subject:</b> {message.Subject}<br>
               <b>Sent:</b> {DateTime.UtcNow:u}
             </div>

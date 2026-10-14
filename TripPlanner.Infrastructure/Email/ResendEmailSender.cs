@@ -32,6 +32,12 @@ public sealed class ResendEmailSender : IEmailSender
         _logger = logger;
     }
 
+    /// <summary>Absent optional fields are left out rather than sent as null.</summary>
+    private static readonly JsonSerializerOptions OmitNulls = new()
+    {
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+    };
+
     public async Task SendAsync(EmailMessage message, CancellationToken ct = default)
     {
         var payload = new
@@ -40,10 +46,11 @@ public sealed class ResendEmailSender : IEmailSender
             to = new[] { message.ToAddress },
             subject = message.Subject,
             html = message.HtmlBody,
-            text = message.PlainTextBody
+            text = message.PlainTextBody,
+            reply_to = message.ReplyTo
         };
 
-        using var response = await _http.PostAsJsonAsync("emails", payload, ct);
+        using var response = await _http.PostAsJsonAsync("emails", payload, OmitNulls, ct);
 
         if (response.IsSuccessStatusCode)
         {

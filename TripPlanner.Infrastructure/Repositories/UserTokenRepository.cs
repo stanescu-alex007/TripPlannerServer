@@ -27,10 +27,19 @@ namespace TripPlanner.Infrastructure.Repositories
             await _context.SaveChangesAsync(ct);
         }
 
-        public async Task UpdateAsync(UserToken token, CancellationToken ct = default)
+        public async Task<bool> TryMarkUsedAsync(Guid tokenId, CancellationToken ct = default)
         {
-            _context.UserTokens.Update(token);
-            await _context.SaveChangesAsync(ct);
+            var now = _clock.GetUtcNow().UtcDateTime;
+
+            // The WHERE clause is the guard: of two concurrent redemptions, only one
+            // statement can still match. Bulk update, so UpdatedAt is set here.
+            var affected = await _context.UserTokens
+                .Where(t => t.Id == tokenId && t.UsedAt == null && t.InvalidatedAt == null)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(t => t.UsedAt, now)
+                    .SetProperty(t => t.UpdatedAt, now), ct);
+
+            return affected > 0;
         }
 
         public Task<int> InvalidateOutstandingAsync(Guid userId, string purpose, CancellationToken ct = default)

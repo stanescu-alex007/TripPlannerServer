@@ -3,12 +3,6 @@ using TripPlanner.Core.Models;
 namespace TripPlanner.Core.Interfaces.IServices
 {
     /// <summary>
-    /// Context about the caller, recorded on issued refresh tokens so a session can
-    /// later be recognised in the "your devices" list.
-    /// </summary>
-    public sealed record RequestContext(string? IpAddress, string? UserAgent);
-
-    /// <summary>
     /// What a password check produced: either a signed-in session, or a challenge
     /// that still needs a second factor.
     /// </summary>
@@ -27,15 +21,9 @@ namespace TripPlanner.Core.Interfaces.IServices
             new() { ChallengeToken = challengeToken };
     }
 
-    public interface IAuthService
+    /// <summary>Getting in: the password step and, when enabled, the second factor.</summary>
+    public interface ISignInService
     {
-        Task<Result> RegisterAsync(RegisterRequest request, CancellationToken ct = default);
-
-        Task<Result> VerifyEmailAsync(string rawToken, CancellationToken ct = default);
-
-        /// <summary>Always reports success, so it cannot be used to probe for accounts.</summary>
-        Task<Result> ResendVerificationAsync(string email, CancellationToken ct = default);
-
         /// <summary>
         /// Verifies the password. Returns a challenge instead of tokens when the account
         /// has two-factor enabled.
@@ -49,18 +37,5 @@ namespace TripPlanner.Core.Interfaces.IServices
         /// </summary>
         Task<Result<AuthTokens>> CompleteTwoFactorAsync(
             string challengeToken, string code, RequestContext context, CancellationToken ct = default);
-
-        Task<Result<AuthTokens>> RefreshAsync(
-            string rawRefreshToken, RequestContext context, CancellationToken ct = default);
-
-        Task<Result> LogoutAsync(string? rawRefreshToken, CancellationToken ct = default);
-
-        Task<Result> ForgotPasswordAsync(string email, CancellationToken ct = default);
-
-        Task<Result> ResetPasswordAsync(string rawToken, string newPassword, CancellationToken ct = default);
-
-        Task<Result<AuthTokens>> ChangePasswordAsync(
-            Guid userId, string currentPassword, string newPassword,
-            RequestContext context, CancellationToken ct = default);
     }
 }

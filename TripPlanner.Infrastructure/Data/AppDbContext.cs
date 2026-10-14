@@ -5,6 +5,12 @@ namespace TripPlanner.Infrastructure.Data;
 
 public class AppDbContext : DbContext
 {
+    /// <summary>
+    /// Index filter for soft-deletable tables: a uniqueness rule must only bind rows that
+    /// still exist, or deleted rows keep their values reserved forever.
+    /// </summary>
+    private const string NotDeleted = "\"DeletedAt\" IS NULL";
+
     public AppDbContext(DbContextOptions<AppDbContext> options) : base(options)
     {
     }
@@ -17,6 +23,8 @@ public class AppDbContext : DbContext
     public DbSet<UserToken> UserTokens => Set<UserToken>();
     public DbSet<UserRecoveryCode> UserRecoveryCodes => Set<UserRecoveryCode>();
     public DbSet<ExternalLogin> ExternalLogins => Set<ExternalLogin>();
+    public DbSet<TripInvitation> TripInvitations => Set<TripInvitation>();
+    public DbSet<TripOwnershipTransfer> TripOwnershipTransfers => Set<TripOwnershipTransfer>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -35,12 +43,17 @@ public class AppDbContext : DbContext
             // Optional: an account that only signs in through an external provider
             // has no password at all.
             entity.Property(u => u.PasswordHash).HasMaxLength(512);
-            entity.Property(u => u.TwoFactorSecret).HasMaxLength(128);
+            // Encrypted at rest — sized for the ciphertext envelope, not the Base32 secret.
+            entity.Property(u => u.TwoFactorSecret).HasMaxLength(256);
 
             // The application lower-cases before writing, so a plain unique index is
             // enough and — unlike a lower(Email) expression index — stays usable by
             // ordinary equality lookups.
-            entity.HasIndex(u => u.Email).IsUnique();
+            //
+            // Unique among live accounts only. A deleted account keeps its row, and an
+            // unfiltered index would keep its address claimed forever, so the owner could
+            // never sign up again.
+            entity.HasIndex(u => u.Email).IsUnique().HasFilter(NotDeleted);
 
             entity.HasQueryFilter(u => u.DeletedAt == null);
         });
@@ -56,14 +69,21 @@ public class AppDbContext : DbContext
             entity.Property(t => t.Image).HasMaxLength(500);
             entity.Property(t => t.Description).HasMaxLength(2000);
             entity.Property(t => t.Budget).HasPrecision(12, 2);
+            entity.Property(t => t.Currency).HasMaxLength(3).IsRequired().HasDefaultValue("EUR");
 
+            // Optional: a trip loses its owner when they delete their account, and stays
+            // ownerless until someone accepts it or it is archived.
             entity.HasOne(t => t.Owner)
                   .WithMany(u => u.OwnedTrips)
                   .HasForeignKey(t => t.OwnerId)
+                  .IsRequired(false)
                   .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasIndex(t => t.OwnerId);
             entity.HasIndex(t => new { t.StartDate, t.EndDate });
+
+            // Serves both the "recently deleted" list and the purge sweep.
+            entity.HasIndex(t => new { t.DeletedByUserId, t.DeletedAt });
 
             entity.ToTable(t => t.HasCheckConstraint(
                 "CK_Trips_DateRange", "\"EndDate\" >= \"StartDate\""));
@@ -92,7 +112,9 @@ public class AppDbContext : DbContext
                   .IsRequired(false)
                   .OnDelete(DeleteBehavior.SetNull);
 
-            entity.HasIndex(p => new { p.TripId, p.Email }).IsUnique();
+            // Filtered for the same reason as Users.Email: someone removed from a trip
+            // leaves a soft-deleted row behind, and must still be invitable again.
+            entity.HasIndex(p => new { p.TripId, p.Email }).IsUnique().HasFilter(NotDeleted);
             entity.HasIndex(p => p.UserId);
 
             entity.ToTable(t =>
@@ -196,6 +218,69 @@ public class AppDbContext : DbContext
                 "\"Purpose\" IN ('email-verification','password-reset','email-change','two-factor-challenge')"));
 
             entity.HasQueryFilter(t => t.User.DeletedAt == null);
+        });
+
+        // ── TripInvitation ────────────────────────────────────────────────────
+        modelBuilder.Entity<TripInvitation>(entity =>
+        {
+            entity.HasKey(i => i.Id);
+
+            entity.Property(i => i.TokenHash).HasMaxLength(64).IsRequired();
+
+            entity.HasOne(i => i.Participant)
+                  .WithMany(p => p.Invitations)
+                  .HasForeignKey(i => i.TripParticipantId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            // Every response is a lookup by hash.
+            entity.HasIndex(i => i.TokenHash).IsUnique();
+            entity.HasIndex(i => i.TripParticipantId);
+            entity.HasIndex(i => i.ExpiresAt);
+
+            // Removing someone from a trip soft-deletes the participant; their
+            // invitation must stop resolving at the same moment.
+            entity.HasQueryFilter(i => i.Participant.DeletedAt == null);
+        });
+
+        // ── TripOwnershipTransfer ─────────────────────────────────────────────
+        modelBuilder.Entity<TripOwnershipTransfer>(entity =>
+        {
+            entity.HasKey(o => o.Id);
+
+            // A concurrency token: accepting and lapsing can race at the moment an offer
+            // expires, and the second writer must fail rather than silently win.
+            entity.Property(o => o.Status).HasMaxLength(20).IsRequired().IsConcurrencyToken();
+
+            entity.HasOne(o => o.Trip)
+                  .WithMany(t => t.OwnershipTransfers)
+                  .HasForeignKey(o => o.TripId)
+                  .OnDelete(DeleteBehavior.Cascade);
+
+            // ClientNoAction: participant rows are soft-deleted, so the database never
+            // sees a delete — but EF's in-memory cascade would, and would physically
+            // remove tracked offers (the record of who was already asked) the moment a
+            // candidate's seat is vacated.
+            entity.HasOne(o => o.Candidate)
+                  .WithMany()
+                  .HasForeignKey(o => o.CandidateParticipantId)
+                  .OnDelete(DeleteBehavior.ClientNoAction);
+
+            // Offers go out strictly one at a time.
+            entity.HasIndex(o => o.TripId, "IX_TripOwnershipTransfers_OnePendingPerTrip")
+                  .IsUnique()
+                  .HasFilter("\"Status\" = 'Pending'");
+
+            entity.HasIndex(o => o.TripId);
+            entity.HasIndex(o => o.CandidateParticipantId);
+
+            // The expiry sweep.
+            entity.HasIndex(o => new { o.Status, o.ExpiresAt });
+
+            entity.ToTable(t => t.HasCheckConstraint(
+                "CK_TripOwnershipTransfers_Status",
+                "\"Status\" IN ('Pending','Accepted','Declined','Expired','Withdrawn')"));
+
+            entity.HasQueryFilter(o => o.Trip.DeletedAt == null);
         });
 
         // ── UserRecoveryCode ──────────────────────────────────────────────────

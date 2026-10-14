@@ -13,11 +13,23 @@ namespace TripPlanner.Core.Interfaces.IRepositories
         Task AddAsync(RefreshToken token, CancellationToken ct = default);
 
         /// <summary>
-        /// Revokes <paramref name="current"/>, links it to <paramref name="replacement"/>
-        /// and stores the replacement — in a single transaction, so a session can never
-        /// end up with neither token valid.
+        /// Revokes <paramref name="current"/> — but only if it is still active, decided by
+        /// one conditional statement — then stores <paramref name="replacement"/> and links
+        /// the two. False means another request rotated or revoked it first, and nothing
+        /// was written.
+        /// <para>
+        /// Several statements: run it inside <see cref="IUnitOfWork"/>, so a session can
+        /// never end up with its old link revoked and no new one stored.
+        /// </para>
         /// </summary>
-        Task RotateAsync(RefreshToken current, RefreshToken replacement, CancellationToken ct = default);
+        Task<bool> TryRotateAsync(RefreshToken current, RefreshToken replacement, CancellationToken ct = default);
+
+        /// <summary>
+        /// The family's newest active, unexpired link — the one a concurrent refresh
+        /// rotated to. Null when the family has no live link left (signed out, revoked,
+        /// expired).
+        /// </summary>
+        Task<RefreshToken?> GetLiveHeadAsync(Guid familyId, CancellationToken ct = default);
 
         /// <summary>
         /// Revokes every still-active token in a family. Used both for ordinary sign-out
@@ -40,6 +52,12 @@ namespace TripPlanner.Core.Interfaces.IRepositories
         /// <summary>Revokes one family, but only if it belongs to this user.</summary>
         Task<bool> RevokeFamilyForUserAsync(
             Guid userId, Guid familyId, string reason, CancellationToken ct = default);
+
+        /// <summary>
+        /// Whether the session behind an access token is still alive: a live, unrevoked
+        /// token in that family, belonging to an account that still exists.
+        /// </summary>
+        Task<bool> IsSessionLiveAsync(Guid userId, Guid familyId, CancellationToken ct = default);
 
         /// <summary>Revokes every family except the one given — "sign out everywhere else".</summary>
         Task<int> RevokeAllExceptFamilyAsync(

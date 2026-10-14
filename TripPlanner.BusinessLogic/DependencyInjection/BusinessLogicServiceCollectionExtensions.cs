@@ -2,6 +2,7 @@ using System.Text;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using TripPlanner.BusinessLogic.Services;
+using TripPlanner.BusinessLogic.Services.Auth;
 using TripPlanner.Core.Common;
 using TripPlanner.Core.Interfaces.IServices;
 
@@ -14,12 +15,38 @@ namespace TripPlanner.BusinessLogic.DependencyInjection
         {
             services.AddSingleton(BuildAuthSettings(configuration));
 
+            services.AddSingleton(BuildSecretProtectionKeys(configuration));
+            services.AddSingleton<ISecretProtector, AesGcmSecretProtector>();
+
+            // Authentication, one service per responsibility
+            services.AddScoped<IRegistrationService, RegistrationService>();
+            services.AddScoped<ISignInService, SignInService>();
+            services.AddScoped<ISessionService, SessionService>();
+            services.AddScoped<IPasswordManagementService, PasswordManagementService>();
+
+            // Building blocks the auth services share
+            services.AddScoped<ISessionIssuer, SessionIssuer>();
+            services.AddScoped<IOneTimeTokenService, OneTimeTokenService>();
+            services.AddScoped<ILoginThrottle, LoginThrottle>();
+            services.AddScoped<ITwoFactorCredentialService, TwoFactorCredentialService>();
+
             // Services
-            services.AddScoped<IAuthService, AuthService>();
             services.AddScoped<IAccountSecurityService, AccountSecurityService>();
             services.AddScoped<IUserService, UserService>();
             services.AddScoped<ITripService, TripService>();
             services.AddScoped<ITripScheduleService, TripScheduleService>();
+            services.AddScoped<ITripInvitationService, TripInvitationService>();
+            services.AddScoped<ITripOwnershipService, TripOwnershipService>();
+
+            // Contact page → team inbox. Left unset, the endpoint answers CONTACT_UNAVAILABLE
+            // instead of failing start-up, so local development needs no extra setup.
+            services.AddSingleton(new ContactSettings(configuration["Contact:InboxAddress"]));
+            services.AddScoped<IContactService, ContactService>();
+
+            // The trips module subscribes to account events, so auth does not have to
+            // know it exists.
+            services.AddScoped<IUserVerifiedHandler, LinkInvitationsOnVerifiedHandler>();
+            services.AddScoped<IUserEmailChangedHandler, SyncParticipantsOnEmailChangedHandler>();
 
             // Helpers
             services.AddSingleton<IPasswordService, PasswordService>();
@@ -58,8 +85,60 @@ namespace TripPlanner.BusinessLogic.DependencyInjection
                 AccessTokenMinutes = ReadInt(jwt, "AccessTokenMinutes", 15),
                 RefreshTokenDays = ReadInt(jwt, "RefreshTokenDays", 7),
                 RefreshFamilyDays = ReadInt(jwt, "RefreshFamilyDays", 30),
+                RefreshReuseGraceSeconds = ReadInt(jwt, "RefreshReuseGraceSeconds", 30),
                 FrontendBaseUrl = configuration["Frontend:BaseUrl"] ?? "http://localhost:4200"
             };
+        }
+
+        /// <summary>
+        /// Loads the key ring that encrypts secrets at rest. Refuses to start without one:
+        /// running on a missing or malformed key would not fail loudly, it would write
+        /// secrets nobody can read back.
+        /// </summary>
+        public static SecretProtectionKeys BuildSecretProtectionKeys(IConfiguration configuration)
+        {
+            const string Hint =
+                "In development set it with: dotnet user-secrets set \"SecretProtection:Keys:k1\" " +
+                "\"<32 random bytes, base64>\" (and SecretProtection:ActiveKeyId to \"k1\"). " +
+                "Losing a key makes every secret written with it unreadable — back it up like the JWT key.";
+
+            var section = configuration.GetSection("SecretProtection");
+            var activeKeyId = section["ActiveKeyId"];
+
+            if (string.IsNullOrWhiteSpace(activeKeyId))
+                throw new InvalidOperationException("SecretProtection:ActiveKeyId is not configured. " + Hint);
+
+            var keys = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+
+            foreach (var entry in section.GetSection("Keys").GetChildren())
+            {
+                // The id is embedded in the stored value between '.' separators.
+                if (entry.Key.Length == 0 || !entry.Key.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_'))
+                    throw new InvalidOperationException(
+                        $"SecretProtection key id '{entry.Key}' may only contain letters, digits, '-' and '_'.");
+
+                byte[] material;
+                try
+                {
+                    material = Convert.FromBase64String(entry.Value ?? string.Empty);
+                }
+                catch (FormatException)
+                {
+                    throw new InvalidOperationException($"SecretProtection:Keys:{entry.Key} is not valid base64.");
+                }
+
+                if (material.Length != 32)
+                    throw new InvalidOperationException(
+                        $"SecretProtection:Keys:{entry.Key} must decode to exactly 32 bytes for AES-256.");
+
+                keys[entry.Key] = material;
+            }
+
+            if (!keys.ContainsKey(activeKeyId))
+                throw new InvalidOperationException(
+                    $"SecretProtection:Keys:{activeKeyId} (the active key) is not configured. " + Hint);
+
+            return new SecretProtectionKeys(activeKeyId, keys);
         }
 
         /// <summary>

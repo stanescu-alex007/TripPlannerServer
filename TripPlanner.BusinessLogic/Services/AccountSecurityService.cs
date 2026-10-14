@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using TripPlanner.BusinessLogic.Email;
 using TripPlanner.Core.Common;
 using TripPlanner.Core.Entities;
+using TripPlanner.Core.Interfaces;
 using TripPlanner.Core.Interfaces.IRepositories;
 using TripPlanner.Core.Interfaces.IServices;
 using TripPlanner.Core.Models;
@@ -11,44 +12,51 @@ namespace TripPlanner.BusinessLogic.Services
     public class AccountSecurityService : IAccountSecurityService
     {
         private readonly IUserRepository _users;
-        private readonly IUserTokenRepository _userTokens;
-        private readonly IUserRecoveryCodeRepository _recoveryCodes;
         private readonly IRefreshTokenRepository _refreshTokens;
         private readonly IPasswordService _passwords;
-        private readonly ISecureTokenService _secureTokens;
-        private readonly ITwoFactorService _twoFactor;
+        private readonly ITwoFactorService _totp;
+        private readonly ITwoFactorCredentialService _twoFactorCredentials;
+        private readonly IOneTimeTokenService _oneTimeTokens;
+        private readonly IUnitOfWork _unitOfWork;
         private readonly IEmailSender _email;
+
+        /// <summary>
+        /// Modules holding data keyed by the address. They run inside the email-change
+        /// transaction, so the account and everything that refers to it move together.
+        /// </summary>
+        private readonly IEnumerable<IUserEmailChangedHandler> _emailChangedHandlers;
+
         private readonly AuthSettings _settings;
         private readonly TimeProvider _clock;
         private readonly ILogger<AccountSecurityService> _logger;
 
         public AccountSecurityService(
             IUserRepository users,
-            IUserTokenRepository userTokens,
-            IUserRecoveryCodeRepository recoveryCodes,
             IRefreshTokenRepository refreshTokens,
             IPasswordService passwords,
-            ISecureTokenService secureTokens,
-            ITwoFactorService twoFactor,
+            ITwoFactorService totp,
+            ITwoFactorCredentialService twoFactorCredentials,
+            IOneTimeTokenService oneTimeTokens,
+            IUnitOfWork unitOfWork,
             IEmailSender email,
+            IEnumerable<IUserEmailChangedHandler> emailChangedHandlers,
             AuthSettings settings,
             TimeProvider clock,
             ILogger<AccountSecurityService> logger)
         {
             _users = users;
-            _userTokens = userTokens;
-            _recoveryCodes = recoveryCodes;
             _refreshTokens = refreshTokens;
             _passwords = passwords;
-            _secureTokens = secureTokens;
-            _twoFactor = twoFactor;
+            _totp = totp;
+            _twoFactorCredentials = twoFactorCredentials;
+            _oneTimeTokens = oneTimeTokens;
+            _unitOfWork = unitOfWork;
             _email = email;
+            _emailChangedHandlers = emailChangedHandlers;
             _settings = settings;
             _clock = clock;
             _logger = logger;
         }
-
-        private DateTime Now => _clock.GetUtcNow().UtcDateTime;
 
         // ── TWO-FACTOR ────────────────────────────────────────────────────────
 
@@ -63,7 +71,7 @@ namespace TripPlanner.BusinessLogic.Services
 
             // The secret is handed out but not stored: if the user walks away now, the
             // account is untouched and they simply start over.
-            var setup = _twoFactor.GenerateSetup(user.Email);
+            var setup = _totp.GenerateSetup(user.Email);
 
             return Result<TwoFactorSetupResponse>.Ok(
                 new TwoFactorSetupResponse(setup.Secret, setup.OtpAuthUri));
@@ -83,16 +91,12 @@ namespace TripPlanner.BusinessLogic.Services
 
             // Proving one live code confirms the secret really is in their app —
             // without this, enabling 2FA could lock the user out permanently.
-            if (!_twoFactor.VerifyCode(secret, code))
+            if (!_totp.VerifyCode(secret, code, out var timeStep))
                 return Result<RecoveryCodesResponse>.Fail(ErrorCodes.TwoFactorCodeInvalid);
 
-            user.TwoFactorSecret = secret;
-            user.TwoFactorEnabledAt = Now;
-            await _users.UpdateAsync(user, ct);
+            var codes = await _twoFactorCredentials.EnableAsync(user, secret, timeStep, ct);
 
-            var codes = await IssueRecoveryCodesAsync(user, ct);
-
-            await TrySendAsync(AuthEmailTemplates.TwoFactorChanged(user, enabled: true), ct);
+            await _email.TrySendAsync(AuthEmailTemplates.TwoFactorChanged(user, enabled: true), _logger, ct);
 
             _logger.LogInformation("Two-factor enabled for user {UserId}.", user.Id);
             return Result<RecoveryCodesResponse>.Ok(new RecoveryCodesResponse(codes));
@@ -109,15 +113,9 @@ namespace TripPlanner.BusinessLogic.Services
             var passwordError = VerifyPassword(user, password);
             if (passwordError is not null) return Result.Fail(passwordError);
 
-            user.TwoFactorSecret = null;
-            user.TwoFactorEnabledAt = null;
-            await _users.UpdateAsync(user, ct);
+            await _twoFactorCredentials.DisableAsync(user, ct);
 
-            // Recovery codes only exist to get past 2FA; without it they are a second
-            // set of credentials nobody is watching.
-            await _recoveryCodes.DeleteAllAsync(user.Id, ct);
-
-            await TrySendAsync(AuthEmailTemplates.TwoFactorChanged(user, enabled: false), ct);
+            await _email.TrySendAsync(AuthEmailTemplates.TwoFactorChanged(user, enabled: false), _logger, ct);
 
             _logger.LogWarning("Two-factor disabled for user {UserId}.", user.Id);
             return Result.Ok();
@@ -135,7 +133,7 @@ namespace TripPlanner.BusinessLogic.Services
             var passwordError = VerifyPassword(user, password);
             if (passwordError is not null) return Result<RecoveryCodesResponse>.Fail(passwordError);
 
-            var codes = await IssueRecoveryCodesAsync(user, ct);
+            var codes = await _twoFactorCredentials.RegenerateRecoveryCodesAsync(user.Id, ct);
 
             _logger.LogInformation("Recovery codes regenerated for user {UserId}.", user.Id);
             return Result<RecoveryCodesResponse>.Ok(new RecoveryCodesResponse(codes));
@@ -152,7 +150,7 @@ namespace TripPlanner.BusinessLogic.Services
             var passwordError = VerifyPassword(user, password);
             if (passwordError is not null) return Result.Fail(passwordError);
 
-            var normalized = newEmail.Trim().ToLowerInvariant();
+            var normalized = EmailAddress.Normalize(newEmail);
 
             if (normalized == user.Email) return Result.Fail(ErrorCodes.EmailUnchanged);
 
@@ -161,29 +159,20 @@ namespace TripPlanner.BusinessLogic.Services
             if (await _users.ExistsByEmailAsync(normalized, ct))
                 return Result.Fail(ErrorCodes.EmailAlreadyRegistered);
 
-            await _userTokens.InvalidateOutstandingAsync(user.Id, UserTokenPurpose.EmailChange, ct);
-
-            var raw = _secureTokens.Generate();
-
-            await _userTokens.AddAsync(new UserToken
-            {
-                UserId = user.Id,
-                TokenHash = _secureTokens.Hash(raw),
-                Purpose = UserTokenPurpose.EmailChange,
-                NewEmail = normalized,
-                ExpiresAt = Now.AddHours(_settings.EmailChangeHours)
-            }, ct);
-
-            var link = $"{_settings.FrontendBaseUrl.TrimEnd('/')}/auth/confirm-email-change?token={raw}";
+            var raw = await _oneTimeTokens.IssueAsync(
+                user.Id, UserTokenPurpose.EmailChange,
+                TimeSpan.FromHours(_settings.EmailChangeHours), newEmail: normalized, ct: ct);
 
             // Confirmation goes to the new address, since following the link is what
             // proves ownership of it.
-            await TrySendAsync(
-                AuthEmailTemplates.EmailChangeRequested(user, normalized, link, _settings.EmailChangeHours), ct);
+            await _email.TrySendAsync(
+                AuthEmailTemplates.EmailChangeRequested(
+                    user, normalized, FrontendLinks.ConfirmEmailChange(_settings, raw), _settings.EmailChangeHours),
+                _logger, ct);
 
             // And a warning to the old one — the address an attacker is trying to cut
             // off is exactly the one that needs to hear about it.
-            await TrySendAsync(AuthEmailTemplates.EmailChangeNotice(user.Email, normalized), ct);
+            await _email.TrySendAsync(AuthEmailTemplates.EmailChangeNotice(user.Email, normalized), _logger, ct);
 
             _logger.LogInformation("Email change requested for user {UserId}.", user.Id);
             return Result.Ok();
@@ -191,42 +180,58 @@ namespace TripPlanner.BusinessLogic.Services
 
         public async Task<Result> ConfirmEmailChangeAsync(string rawToken, CancellationToken ct = default)
         {
-            if (string.IsNullOrWhiteSpace(rawToken)) return Result.Fail(ErrorCodes.TokenInvalid);
+            var found = await _oneTimeTokens.FindUsableAsync(rawToken, UserTokenPurpose.EmailChange, ct);
+            if (!found.Success) return Result.Fail(found.Error!);
 
-            var token = await _userTokens.GetByHashAsync(_secureTokens.Hash(rawToken), ct);
-
-            if (token is null || token.Purpose != UserTokenPurpose.EmailChange)
-                return Result.Fail(ErrorCodes.TokenInvalid);
-
-            if (token.UsedAt is not null) return Result.Fail(ErrorCodes.TokenAlreadyUsed);
-            if (token.InvalidatedAt is not null) return Result.Fail(ErrorCodes.TokenInvalid);
-            if (token.ExpiresAt <= Now) return Result.Fail(ErrorCodes.TokenExpired);
+            var token = found.Data!;
             if (string.IsNullOrWhiteSpace(token.NewEmail)) return Result.Fail(ErrorCodes.TokenInvalid);
+
+            var newEmail = token.NewEmail;
 
             // Re-checked at the last moment: someone may have registered that address
             // while this link was waiting in an inbox.
-            if (await _users.ExistsByEmailAsync(token.NewEmail, ct))
+            if (await _users.ExistsByEmailAsync(newEmail, ct))
                 return Result.Fail(ErrorCodes.EmailAlreadyRegistered);
 
             var user = token.User;
             var previousEmail = user.Email;
 
-            user.Email = token.NewEmail;
+            bool consumed;
 
-            // The new address has just proved itself by receiving this link, so it
-            // counts as verified.
-            user.EmailVerifiedAt = Now;
-            await _users.UpdateAsync(user, ct);
+            try
+            {
+                consumed = await _unitOfWork.ExecuteAsync(async t =>
+                {
+                    if (!await _oneTimeTokens.TryConsumeAsync(token, t)) return false;
 
-            token.UsedAt = Now;
-            await _userTokens.UpdateAsync(token, ct);
+                    user.Email = newEmail;
 
-            // Sessions are tied to an identity that just changed; forcing a fresh
-            // sign-in keeps a hijacker from riding the old one.
-            await _refreshTokens.RevokeAllForUserAsync(user.Id, RefreshTokenRevokeReason.PasswordChanged, ct);
+                    // The new address has just proved itself by receiving this link, so it
+                    // counts as verified.
+                    user.EmailVerifiedAt = _clock.GetUtcNow().UtcDateTime;
+                    await _users.UpdateAsync(user, t);
+
+                    foreach (var handler in _emailChangedHandlers)
+                        await handler.HandleAsync(user.Id, previousEmail, newEmail, t);
+
+                    // Sessions are tied to an identity that just changed; forcing a fresh
+                    // sign-in keeps a hijacker from riding the old one.
+                    await _refreshTokens.RevokeAllForUserAsync(
+                        user.Id, RefreshTokenRevokeReason.PasswordChanged, t);
+
+                    return true;
+                }, ct);
+            }
+            catch (DuplicateEmailException)
+            {
+                // Claimed between the check above and the write; the index decided.
+                return Result.Fail(ErrorCodes.EmailAlreadyRegistered);
+            }
+
+            if (!consumed) return Result.Fail(ErrorCodes.TokenAlreadyUsed);
 
             _logger.LogInformation(
-                "User {UserId} changed email from {Old} to {New}.", user.Id, previousEmail, user.Email);
+                "User {UserId} changed email from {Old} to {New}.", user.Id, previousEmail, newEmail);
 
             return Result.Ok();
         }
@@ -284,22 +289,6 @@ namespace TripPlanner.BusinessLogic.Services
                 : ErrorCodes.CurrentPasswordIncorrect;
         }
 
-        private async Task<IReadOnlyList<string>> IssueRecoveryCodesAsync(User user, CancellationToken ct)
-        {
-            var plain = _twoFactor.GenerateRecoveryCodes(_settings.RecoveryCodeCount);
-
-            // Hashed like passwords: the table must not be a way around 2FA.
-            var entities = plain.Select(code => new UserRecoveryCode
-            {
-                UserId = user.Id,
-                CodeHash = _passwords.Hash(code)
-            });
-
-            await _recoveryCodes.ReplaceAllAsync(user.Id, entities, ct);
-
-            return plain;
-        }
-
         /// <summary>
         /// A rough, readable device name. Full user-agent parsing is not worth a
         /// dependency here — this only has to help someone recognise their own device.
@@ -328,20 +317,6 @@ namespace TripPlanner.BusinessLogic.Services
                 null;
 
             return platform is null ? browser : $"{browser} on {platform}";
-        }
-
-        private async Task TrySendAsync(EmailMessage message, CancellationToken ct)
-        {
-            try
-            {
-                await _email.SendAsync(message, ct);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex,
-                    "Could not deliver '{Subject}' to {Recipient}. The operation itself succeeded.",
-                    message.Subject, message.ToAddress);
-            }
         }
     }
 }

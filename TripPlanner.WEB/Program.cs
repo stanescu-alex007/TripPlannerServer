@@ -1,4 +1,3 @@
-using Microsoft.AspNetCore.HttpOverrides;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using TripPlanner.BusinessLogic.DependencyInjection;
@@ -52,19 +51,13 @@ builder.Services.AddBusinessLogic(builder.Configuration);
 builder.Services.AddAuthRateLimiting();
 
 builder.Services.AddHostedService<ExpiredTokenCleanupService>();
+builder.Services.AddHostedService<TwoFactorSecretProtectionBackfill>();
+builder.Services.AddHostedService<OwnershipOfferExpiryService>();
+builder.Services.AddHostedService<DeletedTripPurgeService>();
 
-// Behind a reverse proxy every request appears to come from the proxy. Without this
-// the rate limiter partitions all callers into one bucket, so they throttle each
-// other, and every session is recorded against the proxy's address.
-builder.Services.Configure<ForwardedHeadersOptions>(options =>
-{
-    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
-
-    // Cleared because the defaults only trust loopback; the real proxy addresses
-    // belong in configuration for the environment that has them.
-    options.KnownNetworks.Clear();
-    options.KnownProxies.Clear();
-});
+// Which proxies may speak for the client. Configured per environment; with nothing
+// configured the forwarded header is ignored, so it cannot be used to fake an address.
+builder.Services.AddTrustedProxies(builder.Configuration);
 
 // ── Pipeline ──────────────────────────────────────────────────────────────────
 
@@ -94,9 +87,12 @@ if (!app.Environment.IsDevelopment())
 
 app.UseCors(CorsPolicy);
 
+app.UseAuthentication();
+
+// After authentication so per-user policies (contact) can see who is calling; the
+// IP-keyed auth policies are unaffected by the order.
 app.UseRateLimiter();
 
-app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();

@@ -1,5 +1,6 @@
 using TripPlanner.Core.Common;
 using TripPlanner.Core.Entities;
+using TripPlanner.Core.Interfaces;
 using TripPlanner.Core.Interfaces.IRepositories;
 using TripPlanner.Core.Interfaces.IServices;
 using TripPlanner.Core.Models;
@@ -9,12 +10,23 @@ namespace TripPlanner.BusinessLogic.Services
     public class UserService : IUserService
     {
         private readonly IUserRepository _users;
-        private readonly IRefreshTokenRepository _refreshTokens;
+        private readonly ITripRepository _trips;
+        private readonly ITripOwnershipService _ownership;
+        private readonly IPasswordService _passwords;
+        private readonly IUnitOfWork _unitOfWork;
 
-        public UserService(IUserRepository users, IRefreshTokenRepository refreshTokens)
+        public UserService(
+            IUserRepository users,
+            ITripRepository trips,
+            ITripOwnershipService ownership,
+            IPasswordService passwords,
+            IUnitOfWork unitOfWork)
         {
             _users = users;
-            _refreshTokens = refreshTokens;
+            _trips = trips;
+            _ownership = ownership;
+            _passwords = passwords;
+            _unitOfWork = unitOfWork;
         }
 
         public async Task<Result<UserDto>> GetMeAsync(Guid userId, CancellationToken ct = default)
@@ -49,15 +61,50 @@ namespace TripPlanner.BusinessLogic.Services
             return Result<UserDto>.Ok(MapToDto(user));
         }
 
-        public async Task<Result> DeleteAccountAsync(Guid userId, CancellationToken ct = default)
+        public async Task<Result> DeleteAccountAsync(
+            Guid userId, string password, CancellationToken ct = default)
         {
             var user = await _users.GetByIdAsync(userId, ct);
             if (user is null) return Result.Fail(ErrorCodes.UserNotFound);
 
-            // Soft delete keeps trips and their history intact while the account
-            // disappears from the app; every session dies with it.
-            await _users.DeleteAsync(user, ct);
-            await _refreshTokens.RevokeAllForUserAsync(userId, RefreshTokenRevokeReason.Logout, ct);
+            // Re-asked for the same reason as disabling 2FA or changing the email: an
+            // access token lifted from a shared machine or a malicious script must not be
+            // enough to erase the account and everything on it. Same checks, same codes.
+            if (user.PasswordHash is null) return Result.Fail(ErrorCodes.PasswordNotSet);
+
+            if (!_passwords.Verify(password, user.PasswordHash))
+                return Result.Fail(ErrorCodes.CurrentPasswordIncorrect);
+
+            IReadOnlyList<OwnershipOfferNotice> offers;
+
+            try
+            {
+                offers = await _unitOfWork.ExecuteAsync(async t =>
+                {
+                    // Owned trips are offered to the next person in line rather than deleted
+                    // out from under everyone on them; with nobody left, they are deleted.
+                    var created = await _ownership.ReleaseDepartingUserAsync(userId, t);
+
+                    // Seats are vacated, so rosters stop listing someone who can no longer
+                    // answer, and the address can be invited afresh.
+                    await _trips.RemoveUserFromAllTripsAsync(userId, t);
+
+                    // Sessions and every other credential are purged along with the account.
+                    await _users.DeleteAsync(user, t);
+
+                    return created;
+                }, ct);
+            }
+            catch (ConcurrencyConflictException)
+            {
+                // An ownership offer involving this user was answered or lapsed at the
+                // same instant. Everything rolled back — the account is intact — and a
+                // retry works from the offer's new state.
+                return Result.Fail(ErrorCodes.ConcurrencyConflict);
+            }
+
+            // Only once the deletion has committed — never mail an offer that rolled back.
+            await _ownership.NotifyCandidatesAsync(offers, ct);
 
             return Result.Ok();
         }

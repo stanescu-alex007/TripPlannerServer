@@ -218,6 +218,17 @@ public static class ErrorCodes
         "That session no longer exists.",
         ErrorType.NotFound);
 
+    /// <summary>
+    /// Something this request depended on was changed by another request at the same
+    /// moment (e.g. an ownership offer answered or lapsing while its trip was being
+    /// left). Nothing was saved; repeating the action against fresh data will usually
+    /// succeed.
+    /// </summary>
+    public static readonly Error ConcurrencyConflict = new(
+        "CONCURRENCY_CONFLICT",
+        "Something changed while you were doing this. Please refresh and try again.",
+        ErrorType.Conflict);
+
     public static readonly Error Internal = new(
         "INTERNAL_ERROR",
         "Something went wrong on our side. Please try again.",
@@ -230,9 +241,14 @@ public static class ErrorCodes
         "Trip not found.",
         ErrorType.NotFound);
 
+    /// <summary>
+    /// Returned to someone who IS on the trip but lacks the rights for this action.
+    /// Outsiders get <see cref="TripNotFound"/> instead, so the message must not
+    /// claim they have no access — they do, just not enough of it.
+    /// </summary>
     public static readonly Error TripForbidden = new(
         "TRIP_FORBIDDEN",
-        "You do not have access to this trip.",
+        "You don't have permission to do that on this trip.",
         ErrorType.Forbidden);
 
     public static readonly Error TripDateRangeInvalid = new(
@@ -255,6 +271,33 @@ public static class ErrorCodes
         "The trip owner cannot be removed.",
         ErrorType.Validation);
 
+    /// <summary>
+    /// The owner has nowhere to leave to: the trip would be left with nobody able to
+    /// run it, so they delete it or hand it over instead.
+    /// </summary>
+    public static readonly Error OwnerCannotLeave = new(
+        "TRIP_OWNER_CANNOT_LEAVE",
+        "You organise this trip, so you can't leave it. Delete it instead.",
+        ErrorType.Conflict);
+
+    // ── Ownership offers ──────────────────────────────────────────────────────
+
+    /// <summary>Also returned when the offer exists but is addressed to someone else.</summary>
+    public static readonly Error OwnershipOfferNotFound = new(
+        "OWNERSHIP_OFFER_NOT_FOUND",
+        "This ownership offer does not exist.",
+        ErrorType.NotFound);
+
+    public static readonly Error OwnershipOfferExpired = new(
+        "OWNERSHIP_OFFER_EXPIRED",
+        "This offer has expired and was passed on to the next person on the trip.",
+        ErrorType.Validation);
+
+    public static readonly Error OwnershipOfferAlreadyAnswered = new(
+        "OWNERSHIP_OFFER_ALREADY_ANSWERED",
+        "This ownership offer has already been answered.",
+        ErrorType.Conflict);
+
     public static readonly Error ScheduleItemNotFound = new(
         "SCHEDULE_ITEM_NOT_FOUND",
         "Schedule item not found.",
@@ -269,4 +312,52 @@ public static class ErrorCodes
         "SCHEDULE_STATUS_INVALID",
         "Unknown schedule status.",
         ErrorType.Validation);
+
+    // ── Invitations ───────────────────────────────────────────────────────────
+
+    public static readonly Error InvitationNotFound = new(
+        "INVITATION_NOT_FOUND",
+        "This invitation link is not valid.",
+        ErrorType.NotFound);
+
+    public static readonly Error InvitationExpired = new(
+        "INVITATION_EXPIRED",
+        "This invitation has expired. Ask the organiser to send a new one.",
+        ErrorType.Validation);
+
+    public static readonly Error InvitationAlreadyAnswered = new(
+        "INVITATION_ALREADY_ANSWERED",
+        "You have already responded to this invitation.",
+        ErrorType.Conflict);
+
+    public static readonly Error InvitationWithdrawn = new(
+        "INVITATION_WITHDRAWN",
+        "This invitation is no longer valid — the organiser replaced or removed it.",
+        ErrorType.Validation);
+
+    /// <summary>
+    /// Signed in as someone other than the invited address. Accepting anyway would
+    /// put the wrong account on the trip, so the mismatch has to be explicit.
+    /// </summary>
+    public static readonly Error InvitationEmailMismatch = new(
+        "INVITATION_EMAIL_MISMATCH",
+        "This invitation was sent to a different email address than the one you are signed in with.",
+        ErrorType.Forbidden);
+
+    public static readonly Error InvitationSendTooSoon = new(
+        "INVITATION_SEND_TOO_SOON",
+        "An invitation was just sent. Wait a moment before sending another.",
+        ErrorType.TooManyRequests);
+
+    // ── Contact ───────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Contact:InboxAddress is not configured, or the provider rejected the message.
+    /// Unlike notifications, this one is the whole point of the request, so a failed
+    /// send is reported instead of swallowed.
+    /// </summary>
+    public static readonly Error ContactUnavailable = new(
+        "CONTACT_UNAVAILABLE",
+        "Your message could not be sent right now. Please try again later.",
+        ErrorType.Internal);
 }

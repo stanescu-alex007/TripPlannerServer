@@ -4,7 +4,8 @@ namespace TripPlanner.Core.Interfaces.IServices
         string ToAddress,
         string Subject,
         string HtmlBody,
-        string? PlainTextBody = null);
+        string? PlainTextBody = null,
+        string? ReplyTo = null);
 
     /// <summary>
     /// Delivers transactional email. Implementations are swapped by configuration

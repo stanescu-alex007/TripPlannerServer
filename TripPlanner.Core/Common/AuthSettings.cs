@@ -23,6 +23,17 @@ public sealed class AuthSettings
     /// </summary>
     public int RefreshFamilyDays { get; init; } = 30;
 
+    /// <summary>
+    /// How long after a link is rotated it may still be presented without counting as a
+    /// replay. Two tabs refreshing with the same cookie at once is normal browser
+    /// behaviour, not theft: the second request finds the link already rotated, and
+    /// without this window it detonated the whole family and signed the user out
+    /// everywhere. Inside the window the request is served from the family's current
+    /// link instead. Keep it short — it is also how long a stolen, already-rotated link
+    /// stays usable.
+    /// </summary>
+    public int RefreshReuseGraceSeconds { get; init; } = 30;
+
     // ── One-time email tokens ─────────────────────────────────────────────────
     public int EmailVerificationHours { get; init; } = 24;
     public int PasswordResetMinutes { get; init; } = 30;

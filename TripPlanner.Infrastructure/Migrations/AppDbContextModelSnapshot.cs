@@ -149,8 +149,18 @@ namespace TripPlanner.Infrastructure.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)")
+                        .HasDefaultValue("EUR");
+
                     b.Property<DateTime?>("DeletedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DeletedByUserId")
+                        .HasColumnType("uuid");
 
                     b.Property<string>("Description")
                         .HasMaxLength(2000)
@@ -173,7 +183,7 @@ namespace TripPlanner.Infrastructure.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
-                    b.Property<Guid>("OwnerId")
+                    b.Property<Guid?>("OwnerId")
                         .HasColumnType("uuid");
 
                     b.Property<DateTime>("StartDate")
@@ -191,11 +201,108 @@ namespace TripPlanner.Infrastructure.Migrations
 
                     b.HasIndex("OwnerId");
 
+                    b.HasIndex("DeletedByUserId", "DeletedAt");
+
                     b.HasIndex("StartDate", "EndDate");
 
                     b.ToTable("Trips", t =>
                         {
                             t.HasCheckConstraint("CK_Trips_DateRange", "\"EndDate\" >= \"StartDate\"");
+                        });
+                });
+
+            modelBuilder.Entity("TripPlanner.Core.Entities.TripInvitation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("InvalidatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("RespondedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("SendCount")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("SentAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<Guid>("TripParticipantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExpiresAt");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.HasIndex("TripParticipantId");
+
+                    b.ToTable("TripInvitations");
+                });
+
+            modelBuilder.Entity("TripPlanner.Core.Entities.TripOwnershipTransfer", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CandidateParticipantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("RespondedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Status")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<Guid>("TripId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CandidateParticipantId");
+
+                    b.HasIndex("TripId");
+
+                    b.HasIndex("Status", "ExpiresAt");
+
+                    b.HasIndex(new[] { "TripId" }, "IX_TripOwnershipTransfers_OnePendingPerTrip")
+                        .IsUnique()
+                        .HasFilter("\"Status\" = 'Pending'");
+
+                    b.ToTable("TripOwnershipTransfers", t =>
+                        {
+                            t.HasCheckConstraint("CK_TripOwnershipTransfers_Status", "\"Status\" IN ('Pending','Accepted','Declined','Expired','Withdrawn')");
                         });
                 });
 
@@ -245,7 +352,8 @@ namespace TripPlanner.Infrastructure.Migrations
                     b.HasIndex("UserId");
 
                     b.HasIndex("TripId", "Email")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("\"DeletedAt\" IS NULL");
 
                     b.ToTable("TripParticipants", t =>
                         {
@@ -370,9 +478,12 @@ namespace TripPlanner.Infrastructure.Migrations
                     b.Property<DateTime?>("TwoFactorEnabledAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<long?>("TwoFactorLastStep")
+                        .HasColumnType("bigint");
+
                     b.Property<string>("TwoFactorSecret")
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -380,7 +491,8 @@ namespace TripPlanner.Infrastructure.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("Email")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("\"DeletedAt\" IS NULL");
 
                     b.ToTable("Users");
                 });
@@ -502,10 +614,39 @@ namespace TripPlanner.Infrastructure.Migrations
                     b.HasOne("TripPlanner.Core.Entities.User", "Owner")
                         .WithMany("OwnedTrips")
                         .HasForeignKey("OwnerId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("Owner");
+                });
+
+            modelBuilder.Entity("TripPlanner.Core.Entities.TripInvitation", b =>
+                {
+                    b.HasOne("TripPlanner.Core.Entities.TripParticipant", "Participant")
+                        .WithMany("Invitations")
+                        .HasForeignKey("TripParticipantId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Participant");
+                });
+
+            modelBuilder.Entity("TripPlanner.Core.Entities.TripOwnershipTransfer", b =>
+                {
+                    b.HasOne("TripPlanner.Core.Entities.TripParticipant", "Candidate")
+                        .WithMany()
+                        .HasForeignKey("CandidateParticipantId")
+                        .OnDelete(DeleteBehavior.ClientNoAction)
+                        .IsRequired();
+
+                    b.HasOne("TripPlanner.Core.Entities.Trip", "Trip")
+                        .WithMany("OwnershipTransfers")
+                        .HasForeignKey("TripId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Candidate");
+
+                    b.Navigation("Trip");
                 });
 
             modelBuilder.Entity("TripPlanner.Core.Entities.TripParticipant", b =>
@@ -561,9 +702,16 @@ namespace TripPlanner.Infrastructure.Migrations
 
             modelBuilder.Entity("TripPlanner.Core.Entities.Trip", b =>
                 {
+                    b.Navigation("OwnershipTransfers");
+
                     b.Navigation("Participants");
 
                     b.Navigation("ScheduleItems");
+                });
+
+            modelBuilder.Entity("TripPlanner.Core.Entities.TripParticipant", b =>
+                {
+                    b.Navigation("Invitations");
                 });
 
             modelBuilder.Entity("TripPlanner.Core.Entities.User", b =>

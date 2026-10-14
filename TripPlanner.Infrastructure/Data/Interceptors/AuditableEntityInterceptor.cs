@@ -47,23 +47,16 @@ public sealed class AuditableEntityInterceptor : SaveChangesInterceptor
 
         var now = _clock.GetUtcNow().UtcDateTime;
 
-        foreach (var entry in context.ChangeTracker.Entries())
+        // Materialised because the loop changes entry states.
+        foreach (var entry in context.ChangeTracker.Entries().ToList())
         {
             if (entry.State is EntityState.Detached or EntityState.Unchanged)
                 continue;
 
             // Deleting something soft-deletable becomes an update.
-            if (entry.State == EntityState.Deleted && entry.Entity is ISoftDeletable softDeletable)
+            if (entry.State == EntityState.Deleted && entry.Entity is ISoftDeletable)
             {
-                entry.State = EntityState.Modified;
-                softDeletable.DeletedAt = now;
-
-                // Only the two columns we touched should be written.
-                MarkOnly(entry, nameof(ISoftDeletable.DeletedAt), nameof(IAuditable.UpdatedAt));
-
-                if (entry.Entity is IAuditable softAuditable)
-                    softAuditable.UpdatedAt = now;
-
+                SoftDelete(entry, now);
                 continue;
             }
 
@@ -86,16 +79,29 @@ public sealed class AuditableEntityInterceptor : SaveChangesInterceptor
         }
     }
 
-    /// <summary>Narrows an entry so only the named properties are sent to the database.</summary>
-    private static void MarkOnly(EntityEntry entry, params string[] propertyNames)
+    /// <summary>
+    /// Writes only the deletion columns. The order matters: clearing <c>IsModified</c>
+    /// restores a property's original value, so the stamps are assigned after the
+    /// entry has been narrowed — assigned before, they were silently reverted and the
+    /// row was never actually marked deleted.
+    /// </summary>
+    private static void SoftDelete(EntityEntry entry, DateTime now)
     {
+        entry.State = EntityState.Modified;
+
         foreach (var property in entry.Properties)
             property.IsModified = false;
 
-        foreach (var name in propertyNames)
-        {
-            var property = entry.Properties.FirstOrDefault(p => p.Metadata.Name == name);
-            if (property is not null) property.IsModified = true;
-        }
+        Stamp(entry, nameof(ISoftDeletable.DeletedAt), now);
+
+        if (entry.Entity is IAuditable)
+            Stamp(entry, nameof(IAuditable.UpdatedAt), now);
+    }
+
+    private static void Stamp(EntityEntry entry, string propertyName, DateTime value)
+    {
+        var property = entry.Property(propertyName);
+        property.CurrentValue = value;
+        property.IsModified = true;
     }
 }

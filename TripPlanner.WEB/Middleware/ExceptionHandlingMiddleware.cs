@@ -33,6 +33,25 @@ public sealed class ExceptionHandlingMiddleware
         {
             // The client hung up — not an error worth reporting or logging as one.
         }
+        catch (ConcurrencyConflictException ex) when (!context.Response.HasStarted)
+        {
+            // Services translate the conflicts they expect into a Result; this is the
+            // safety net for any path that does not. A lost race is the caller's cue to
+            // reload and retry, not a server fault, so it is a 409 rather than a 500.
+            _logger.LogWarning(ex,
+                "Unhandled concurrency conflict for {Method} {Path}.",
+                context.Request.Method, context.Request.Path);
+
+            context.Response.Clear();
+            context.Response.StatusCode = StatusCodes.Status409Conflict;
+            context.Response.ContentType = "application/json";
+
+            await context.Response.WriteAsJsonAsync(new
+            {
+                code = ErrorCodes.ConcurrencyConflict.Code,
+                message = ErrorCodes.ConcurrencyConflict.Message
+            });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex,

@@ -61,6 +61,13 @@ namespace TripPlanner.Core.Entities
         /// </summary>
         public DateTime? TwoFactorEnabledAt { get; set; }
 
+        /// <summary>
+        /// The newest 30-second step already spent on this account. A code stays valid
+        /// for its window on purpose, which without this would let anyone who saw it —
+        /// over a shoulder, in a screenshot — use it again before it lapses.
+        /// </summary>
+        public long? TwoFactorLastStep { get; set; }
+
         public bool IsTwoFactorEnabled => TwoFactorEnabledAt.HasValue;
 
         public DateTime CreatedAt { get; set; }

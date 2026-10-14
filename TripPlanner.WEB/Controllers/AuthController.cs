@@ -8,18 +8,33 @@ using TripPlanner.Core.Models;
 namespace TripPlanner.WEB.Controllers;
 
 [Route("api/[controller]")]
-[AllowAnonymous]
 public class AuthController : ApiControllerBase
 {
+    // Deliberately no class-level [AllowAnonymous]: it wins over a method-level
+    // [Authorize], which would leave change-password unprotected by the framework
+    // and relying purely on its own CurrentUserId check. Each anonymous action opts
+    // in for itself instead.
     private const string RefreshCookie = "refreshToken";
 
-    private readonly IAuthService _auth;
+    private readonly IRegistrationService _registration;
+    private readonly ISignInService _signIn;
+    private readonly ISessionService _sessions;
+    private readonly IPasswordManagementService _passwords;
     private readonly IWebHostEnvironment _env;
     private readonly IConfiguration _config;
 
-    public AuthController(IAuthService auth, IWebHostEnvironment env, IConfiguration config)
+    public AuthController(
+        IRegistrationService registration,
+        ISignInService signIn,
+        ISessionService sessions,
+        IPasswordManagementService passwords,
+        IWebHostEnvironment env,
+        IConfiguration config)
     {
-        _auth = auth;
+        _registration = registration;
+        _signIn = signIn;
+        _sessions = sessions;
+        _passwords = passwords;
         _env = env;
         _config = config;
     }
@@ -27,10 +42,11 @@ public class AuthController : ApiControllerBase
     // ── POST /api/auth/register ───────────────────────────────────────────────
     // 201 created · 409 AUTH_EMAIL_ALREADY_EXISTS · 400 AUTH_PASSWORD_TOO_WEAK
     [HttpPost("register")]
+    [AllowAnonymous]
     [EnableRateLimiting(RateLimitPolicies.Registration)]
     public async Task<IActionResult> Register([FromBody] RegisterRequest request, CancellationToken ct)
     {
-        var result = await _auth.RegisterAsync(request, ct);
+        var result = await _registration.RegisterAsync(request, ct);
 
         if (!result.Success) return Failure(result.Error!);
 
@@ -44,10 +60,11 @@ public class AuthController : ApiControllerBase
     // 200 · 400 TOKEN_INVALID | TOKEN_EXPIRED | TOKEN_ALREADY_USED
     // 409 AUTH_EMAIL_ALREADY_VERIFIED
     [HttpPost("verify-email")]
+    [AllowAnonymous]
     [EnableRateLimiting(RateLimitPolicies.Sensitive)]
     public async Task<IActionResult> VerifyEmail([FromBody] VerifyEmailRequest request, CancellationToken ct)
     {
-        var result = await _auth.VerifyEmailAsync(request.Token, ct);
+        var result = await _registration.VerifyEmailAsync(request.Token, ct);
 
         return result.Success
             ? Ok(new { message = "Email confirmed. You can sign in now." })
@@ -57,11 +74,12 @@ public class AuthController : ApiControllerBase
     // ── POST /api/auth/resend-verification ────────────────────────────────────
     // Always 200 — revealing whether the address exists would leak account data.
     [HttpPost("resend-verification")]
+    [AllowAnonymous]
     [EnableRateLimiting(RateLimitPolicies.Sensitive)]
     public async Task<IActionResult> ResendVerification(
         [FromBody] ResendVerificationRequest request, CancellationToken ct)
     {
-        await _auth.ResendVerificationAsync(request.Email, ct);
+        await _registration.ResendVerificationAsync(request.Email, ct);
 
         return Ok(new { message = "If that address needs confirming, a new link is on its way." });
     }
@@ -71,10 +89,11 @@ public class AuthController : ApiControllerBase
     // 401 AUTH_INVALID_CREDENTIALS · 403 AUTH_EMAIL_NOT_VERIFIED
     // 429 AUTH_TOO_MANY_ATTEMPTS | AUTH_LOGIN_THROTTLED
     [HttpPost("login")]
+    [AllowAnonymous]
     [EnableRateLimiting(RateLimitPolicies.Login)]
     public async Task<IActionResult> Login([FromBody] LoginRequest request, CancellationToken ct)
     {
-        var result = await _auth.LoginAsync(request, RequestContext, ct);
+        var result = await _signIn.LoginAsync(request, RequestContext, ct);
 
         if (!result.Success) return Failure(result.Error!);
 
@@ -97,12 +116,14 @@ public class AuthController : ApiControllerBase
     // ── POST /api/auth/2fa ────────────────────────────────────────────────────
     // Completes a sign-in with an authenticator code or a recovery code.
     // 200 · 400 AUTH_2FA_CODE_INVALID · 401 AUTH_2FA_CHALLENGE_INVALID
+    // 429 AUTH_LOGIN_THROTTLED
     [HttpPost("2fa")]
+    [AllowAnonymous]
     [EnableRateLimiting(RateLimitPolicies.Login)]
     public async Task<IActionResult> CompleteTwoFactor(
         [FromBody] TwoFactorLoginRequest request, CancellationToken ct)
     {
-        var result = await _auth.CompleteTwoFactorAsync(
+        var result = await _signIn.CompleteTwoFactorAsync(
             request.ChallengeToken, request.Code, RequestContext, ct);
 
         if (!result.Success) return Failure(result.Error!);
@@ -114,12 +135,13 @@ public class AuthController : ApiControllerBase
     // 200 · 401 AUTH_REFRESH_TOKEN_MISSING | _INVALID | _EXPIRED | _REUSED
     //       | AUTH_SESSION_EXPIRED
     [HttpPost("refresh")]
-    [EnableRateLimiting(RateLimitPolicies.Sensitive)]
+    [AllowAnonymous]
+    [EnableRateLimiting(RateLimitPolicies.Refresh)]
     public async Task<IActionResult> Refresh(CancellationToken ct)
     {
         var cookie = Request.Cookies[RefreshCookie];
 
-        var result = await _auth.RefreshAsync(cookie ?? string.Empty, RequestContext, ct);
+        var result = await _sessions.RefreshAsync(cookie ?? string.Empty, RequestContext, ct);
 
         if (!result.Success)
         {
@@ -135,12 +157,13 @@ public class AuthController : ApiControllerBase
     // Always 200. Anonymous on purpose: identity is taken from the refresh cookie, so
     // signing out still works once the access token has expired.
     [HttpPost("logout")]
+    [AllowAnonymous]
     public async Task<IActionResult> Logout(CancellationToken ct)
     {
         var cookie = Request.Cookies[RefreshCookie];
 
         ClearRefreshCookie();
-        await _auth.LogoutAsync(cookie, ct);
+        await _sessions.LogoutAsync(cookie, ct);
 
         return Ok(new { message = "Signed out." });
     }
@@ -148,11 +171,12 @@ public class AuthController : ApiControllerBase
     // ── POST /api/auth/forgot-password ────────────────────────────────────────
     // Always 200, whether or not the address is registered.
     [HttpPost("forgot-password")]
+    [AllowAnonymous]
     [EnableRateLimiting(RateLimitPolicies.Sensitive)]
     public async Task<IActionResult> ForgotPassword(
         [FromBody] ForgotPasswordRequest request, CancellationToken ct)
     {
-        await _auth.ForgotPasswordAsync(request.Email, ct);
+        await _passwords.ForgotPasswordAsync(request.Email, ct);
 
         return Ok(new { message = "If an account exists for that address, a reset link is on its way." });
     }
@@ -161,11 +185,12 @@ public class AuthController : ApiControllerBase
     // 200 · 400 TOKEN_INVALID | TOKEN_EXPIRED | TOKEN_ALREADY_USED
     //       | AUTH_PASSWORD_TOO_WEAK
     [HttpPost("reset-password")]
+    [AllowAnonymous]
     [EnableRateLimiting(RateLimitPolicies.Sensitive)]
     public async Task<IActionResult> ResetPassword(
         [FromBody] ResetPasswordRequest request, CancellationToken ct)
     {
-        var result = await _auth.ResetPasswordAsync(request.Token, request.NewPassword, ct);
+        var result = await _passwords.ResetPasswordAsync(request.Token, request.NewPassword, ct);
 
         if (!result.Success) return Failure(result.Error!);
 
@@ -187,7 +212,7 @@ public class AuthController : ApiControllerBase
         var userId = CurrentUserId;
         if (userId is null) return Failure(ErrorCodes.Unauthenticated);
 
-        var result = await _auth.ChangePasswordAsync(
+        var result = await _passwords.ChangePasswordAsync(
             userId.Value, request.CurrentPassword, request.NewPassword, RequestContext, ct);
 
         if (!result.Success) return Failure(result.Error!);

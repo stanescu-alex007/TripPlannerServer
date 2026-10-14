@@ -5,7 +5,7 @@ namespace TripPlanner.Core.Interfaces.IServices
     /// <summary>
     /// Everything a signed-in user does to secure their own account: two-factor,
     /// recovery codes, changing their email, and managing where they are signed in.
-    /// Kept apart from <see cref="IAuthService"/>, which is only about getting in.
+    /// Kept apart from <see cref="ISignInService"/>, which is only about getting in.
     /// </summary>
     public interface IAccountSecurityService
     {

@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using TripPlanner.Core.Common;
 using TripPlanner.Core.Interfaces.IServices;
 using TripPlanner.Core.Models;
@@ -38,14 +39,20 @@ public class UserController : ApiControllerBase
         return result.Success ? Ok(result.Data) : Failure(result.Error!);
     }
 
-    // DELETE /api/user/me — 204 · 401 · 404
+    // DELETE /api/user/me — body { "password": "..." }
+    // 204 · 400 AUTH_CURRENT_PASSWORD_INCORRECT | AUTH_PASSWORD_NOT_SET | VALIDATION_FAILED
+    // 401 · 404 · 409 CONCURRENCY_CONFLICT · 429 AUTH_TOO_MANY_ATTEMPTS
+    // Rate-limited like the other password-confirmed actions, so a stolen access token
+    // cannot be used to guess the password here at full speed.
     [HttpDelete("me")]
-    public async Task<IActionResult> DeleteAccount(CancellationToken ct)
+    [EnableRateLimiting(RateLimitPolicies.Sensitive)]
+    public async Task<IActionResult> DeleteAccount(
+        [FromBody] PasswordConfirmationRequest request, CancellationToken ct)
     {
         var userId = CurrentUserId;
         if (userId is null) return Failure(ErrorCodes.Unauthenticated);
 
-        var result = await _users.DeleteAccountAsync(userId.Value, ct);
+        var result = await _users.DeleteAccountAsync(userId.Value, request.Password, ct);
 
         return result.Success ? NoContent() : Failure(result.Error!);
     }

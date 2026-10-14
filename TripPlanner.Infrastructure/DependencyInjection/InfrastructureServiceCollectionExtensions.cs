@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using TripPlanner.Core.Interfaces;
 using TripPlanner.Core.Interfaces.IRepositories;
 using TripPlanner.Infrastructure.Data;
 using TripPlanner.Infrastructure.Data.Interceptors;
@@ -29,12 +30,16 @@ public static class InfrastructureServiceCollectionExtensions
             options.UseNpgsql(connectionString)
                    .AddInterceptors(provider.GetRequiredService<AuditableEntityInterceptor>()));
 
+        services.AddScoped<IUnitOfWork, UnitOfWork>();
+
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
         services.AddScoped<IUserTokenRepository, UserTokenRepository>();
         services.AddScoped<IUserRecoveryCodeRepository, UserRecoveryCodeRepository>();
         services.AddScoped<ITripRepository, TripRepository>();
         services.AddScoped<ITripScheduleRepository, TripScheduleRepository>();
+        services.AddScoped<ITripInvitationRepository, TripInvitationRepository>();
+        services.AddScoped<ITripOwnershipRepository, TripOwnershipRepository>();
 
         return services;
     }

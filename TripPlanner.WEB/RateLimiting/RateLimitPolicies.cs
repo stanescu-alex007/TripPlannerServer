@@ -18,6 +18,23 @@ public static class RateLimitPolicies
     /// spamming and token guessing.
     /// </summary>
     public const string Sensitive = "auth-sensitive";
+
+    /// <summary>
+    /// Refresh-token rotation. Kept apart from <see cref="Sensitive"/> on purpose: the
+    /// SPA refreshes routinely — every access-token lifetime, on every page load, from
+    /// every open tab — and sharing a 10-per-15-minutes bucket with a dozen other
+    /// endpoints signed active users (and whole offices behind one NAT) out for no
+    /// reason. A refresh needs a valid 256-bit token that rotates on use, so there is
+    /// nothing to brute-force; the limit only guards against floods.
+    /// </summary>
+    public const string Refresh = "auth-refresh";
+
+    /// <summary>
+    /// Contact form: each message lands in the team inbox, so a signed-in user gets a
+    /// handful per hour. Keyed on the user rather than the IP — the endpoint is
+    /// authenticated, and users behind one NAT must not share a bucket.
+    /// </summary>
+    public const string Contact = "contact";
 }
 
 public static class RateLimitingServiceCollectionExtensions
@@ -49,6 +66,8 @@ public static class RateLimitingServiceCollectionExtensions
             options.AddPolicy(RateLimitPolicies.Login, PartitionByIp(permit: 10, perMinutes: 5));
             options.AddPolicy(RateLimitPolicies.Registration, PartitionByIp(permit: 5, perMinutes: 60));
             options.AddPolicy(RateLimitPolicies.Sensitive, PartitionByIp(permit: 10, perMinutes: 15));
+            options.AddPolicy(RateLimitPolicies.Refresh, PartitionByIp(permit: 60, perMinutes: 1));
+            options.AddPolicy(RateLimitPolicies.Contact, PartitionByUser(permit: 3, perMinutes: 60));
         });
 
         return services;
@@ -65,6 +84,22 @@ public static class RateLimitingServiceCollectionExtensions
     private static Func<HttpContext, RateLimitPartition<string>> PartitionByIp(int permit, int perMinutes) =>
         httpContext => RateLimitPartition.GetFixedWindowLimiter(
             partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = permit,
+                Window = TimeSpan.FromMinutes(perMinutes),
+                QueueLimit = 0
+            });
+
+    /// <summary>
+    /// A fixed window per signed-in user. Needs <c>UseRateLimiter</c> to run after
+    /// <c>UseAuthentication</c>, or the user is not known yet; anonymous callers fall back
+    /// to their IP.
+    /// </summary>
+    private static Func<HttpContext, RateLimitPartition<string>> PartitionByUser(int permit, int perMinutes) =>
+        httpContext => RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+                          ?? "ip:" + (httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown"),
             factory: _ => new FixedWindowRateLimiterOptions
             {
                 PermitLimit = permit,

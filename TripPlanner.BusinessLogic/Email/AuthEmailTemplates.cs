@@ -41,6 +41,71 @@ internal static class AuthEmailTemplates
                 $"The link is valid for {validMinutes} minutes and can be used once.\n" +
                 "If you did not request this, ignore the email.");
 
+    // ── Trip invitations ──────────────────────────────────────────────────────
+
+    public static EmailMessage TripInvitation(
+        string toAddress, string inviterName, string tripName, string location,
+        string dateRange, string role, string link, int validDays) =>
+        new(
+            ToAddress: toAddress,
+            Subject: $"{inviterName} invited you to {tripName}",
+            HtmlBody: Layout(
+                heading: $"{Escape(inviterName)} invited you along",
+                body: $"<b>{Escape(tripName)}</b><br>{Escape(location)}<br>{Escape(dateRange)}" +
+                      $"<br><br>You have been invited as <b>{Escape(role)}</b>.",
+                buttonText: "View the invitation",
+                buttonUrl: link,
+                footer: $"This invitation is valid for {validDays} days. " +
+                        "If you do not know the sender, you can ignore this email."),
+            PlainTextBody:
+                $"{inviterName} invited you to {tripName} ({location}, {dateRange}) as {role}.\n\n" +
+                $"Respond here: {link}\n\nValid for {validDays} days.");
+
+    /// <summary>
+    /// Tells the organiser how an invitation was answered. They are the one waiting
+    /// on it, and nothing else in the app would surface the reply.
+    /// </summary>
+    public static EmailMessage InvitationAnswered(
+        string ownerEmail, string inviteeName, string tripName, bool accepted, string tripLink) =>
+        new(
+            ToAddress: ownerEmail,
+            Subject: accepted
+                ? $"{inviteeName} joined {tripName}"
+                : $"{inviteeName} declined {tripName}",
+            HtmlBody: Layout(
+                heading: accepted ? "Someone joined your trip 🎉" : "An invitation was declined",
+                body: accepted
+                    ? $"<b>{Escape(inviteeName)}</b> accepted your invitation to <b>{Escape(tripName)}</b>."
+                    : $"<b>{Escape(inviteeName)}</b> will not be joining <b>{Escape(tripName)}</b>.",
+                buttonText: "Open the trip",
+                buttonUrl: tripLink,
+                footer: "You are receiving this because you organise this trip."),
+            PlainTextBody: accepted
+                ? $"{inviteeName} accepted your invitation to {tripName}. {tripLink}"
+                : $"{inviteeName} declined your invitation to {tripName}. {tripLink}");
+
+    /// <summary>
+    /// Asks the next person in line to take over a trip whose owner left. Without it the
+    /// offer would only be found by someone who happened to open the app in time.
+    /// </summary>
+    public static EmailMessage OwnershipOffered(
+        string toAddress, string candidateName, string tripName, string link, int validDays) =>
+        new(
+            ToAddress: toAddress,
+            Subject: $"Would you like to take over {tripName}?",
+            HtmlBody: Layout(
+                heading: "A trip needs a new organiser",
+                body: $"Hi {Escape(candidateName)}, the organiser of <b>{Escape(tripName)}</b> has left " +
+                      "TripPlanner, and you are next in line to take it over. As the owner you can " +
+                      "edit the trip, decide who is on it and delete it.",
+                buttonText: "Respond to the offer",
+                buttonUrl: link,
+                footer: $"The offer is open for {validDays} days. If you decline or do not answer, it " +
+                        "passes to the next person on the trip; if nobody takes it, the trip is deleted."),
+            PlainTextBody:
+                $"The organiser of {tripName} has left TripPlanner and you are next in line to take it over.\n\n" +
+                $"Respond here: {link}\n\nThe offer is open for {validDays} days.");
+
     // ── Security notifications ────────────────────────────────────────────────
     // These are not courtesy mail. If an attacker changes a password, an email
     // address or a 2FA setting, this notice is often the only signal the real owner

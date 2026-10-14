@@ -22,5 +22,16 @@ namespace TripPlanner.Core.Interfaces.IServices
         Task<Result> AddParticipantAsync(Guid tripId, Guid requesterId, AddParticipantRequest request, CancellationToken ct = default);
 
         Task<Result> RemoveParticipantAsync(Guid tripId, Guid requesterId, Guid participantId, CancellationToken ct = default);
+
+        /// <summary>
+        /// The caller takes themselves off the trip. Open to anyone on it except the
+        /// owner, who has nobody to hand it to.
+        /// </summary>
+        Task<Result> LeaveTripAsync(Guid tripId, Guid userId, CancellationToken ct = default);
+
+        /// <summary>Trips the caller deleted, still inside the restore window.</summary>
+        Task<List<DeletedTripDto>> GetDeletedTripsAsync(Guid userId, CancellationToken ct = default);
+
+        Task<Result> RestoreTripAsync(Guid tripId, Guid userId, CancellationToken ct = default);
     }
 }

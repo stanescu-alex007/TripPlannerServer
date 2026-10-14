@@ -12,7 +12,12 @@ namespace TripPlanner.Core.Interfaces.IRepositories
 
         Task AddAsync(UserToken token, CancellationToken ct = default);
 
-        Task UpdateAsync(UserToken token, CancellationToken ct = default);
+        /// <summary>
+        /// Stamps <c>UsedAt</c> only if the token is still unused and not invalidated.
+        /// One conditional statement, so two requests racing on the same link cannot
+        /// both succeed.
+        /// </summary>
+        Task<bool> TryMarkUsedAsync(Guid tokenId, CancellationToken ct = default);
 
         /// <summary>
         /// Retires every outstanding token a user holds for one purpose. Called before

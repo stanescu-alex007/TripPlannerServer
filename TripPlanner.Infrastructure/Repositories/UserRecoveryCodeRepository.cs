@@ -38,16 +38,19 @@ namespace TripPlanner.Infrastructure.Repositories
             await _context.SaveChangesAsync(ct);
         }
 
-        public async Task MarkUsedAsync(Guid codeId, CancellationToken ct = default)
+        public async Task<bool> TryMarkUsedAsync(Guid codeId, CancellationToken ct = default)
         {
             var now = _clock.GetUtcNow().UtcDateTime;
 
-            // Bulk update, so UpdatedAt is maintained here rather than by the interceptor.
-            await _context.UserRecoveryCodes
-                .Where(c => c.Id == codeId)
+            // Conditional on still being unused, so of two concurrent submissions of the
+            // same code only one wins. Bulk update, so UpdatedAt is maintained here.
+            var affected = await _context.UserRecoveryCodes
+                .Where(c => c.Id == codeId && c.UsedAt == null)
                 .ExecuteUpdateAsync(s => s
                     .SetProperty(c => c.UsedAt, now)
                     .SetProperty(c => c.UpdatedAt, now), ct);
+
+            return affected > 0;
         }
 
         public async Task DeleteAllAsync(Guid userId, CancellationToken ct = default)

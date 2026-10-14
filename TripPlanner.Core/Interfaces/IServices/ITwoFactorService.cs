@@ -20,7 +20,11 @@ namespace TripPlanner.Core.Interfaces.IServices
         /// Checks a six-digit code against the secret, allowing one step either side so
         /// a slightly out-of-sync device still works.
         /// </summary>
-        bool VerifyCode(string secret, string code);
+        /// <param name="timeStep">
+        /// Which 30-second step the code belongs to. Recorded by the caller so the same
+        /// code cannot be presented twice while its window is still open.
+        /// </param>
+        bool VerifyCode(string secret, string code, out long timeStep);
 
         /// <summary>Fresh recovery codes, in the plain form shown to the user once.</summary>
         IReadOnlyList<string> GenerateRecoveryCodes(int count = 10);

@@ -35,7 +35,8 @@ public static class TripAccess
 
     /// <summary>
     /// Deleting a trip, transferring it, or changing who is on it stays with the owner —
-    /// an Admin must not be able to remove the owner or hand the trip away.
+    /// an Admin must not be able to remove the owner or hand the trip away. Leaving of
+    /// one's own accord is the exception: that is nobody else's decision.
     /// </summary>
     public static bool IsOwner(Trip trip, Guid userId) => trip.OwnerId == userId;
 

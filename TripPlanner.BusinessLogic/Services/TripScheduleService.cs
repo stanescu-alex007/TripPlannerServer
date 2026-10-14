@@ -29,9 +29,11 @@ namespace TripPlanner.BusinessLogic.Services
             if (trip is null)
                 return Result<List<TripScheduleItemDto>>.Fail(ErrorCodes.TripNotFound);
 
-            // Anyone on the trip may read the schedule; only managers may change it.
+            // "Not found" rather than "forbidden", matching every other trip endpoint.
+            // Answering 403 here would confirm the trip exists to someone who is not on
+            // it, turning the endpoint into a way to probe for valid ids.
             if (!TripAccess.CanView(trip, requesterId))
-                return Result<List<TripScheduleItemDto>>.Fail(ErrorCodes.TripForbidden);
+                return Result<List<TripScheduleItemDto>>.Fail(ErrorCodes.TripNotFound);
 
             var items = await _schedule.GetByTripIdAsync(tripId, ct);
 

@@ -8,7 +8,11 @@ namespace TripPlanner.Core.Interfaces.IServices
 
         Task<Result<UserDto>> UpdateAsync(Guid userId, UpdateUserRequest request, CancellationToken ct = default);
 
-        /// <summary>Soft-deletes the account and revokes every session.</summary>
-        Task<Result> DeleteAccountAsync(Guid userId, CancellationToken ct = default);
+        /// <summary>
+        /// Soft-deletes the account and revokes every session. Requires the current
+        /// password, like every other action that cannot be undone or weakens the
+        /// account: a hijacked session alone must not be enough to destroy it.
+        /// </summary>
+        Task<Result> DeleteAccountAsync(Guid userId, string password, CancellationToken ct = default);
     }
 }
