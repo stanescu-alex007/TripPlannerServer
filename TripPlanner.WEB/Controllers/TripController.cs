@@ -68,6 +68,40 @@ public class TripController : ApiControllerBase
         return result.Success ? Ok(new { message = "Trip updated." }) : Failure(result.Error!);
     }
 
+    // POST /api/trip/{id}/cover — multipart/form-data, field "file"
+    // 200 { image } · 400 IMAGE_MISSING | IMAGE_TOO_LARGE | IMAGE_INVALID
+    // 403 TRIP_FORBIDDEN · 404 TRIP_NOT_FOUND · 429
+    [HttpPost("{id:guid}/cover")]
+    [EnableRateLimiting(RateLimitPolicies.Uploads)]
+    [RequestSizeLimit(ImageUpload.MaxRequestBytes)]
+    [RequestFormLimits(MultipartBodyLengthLimit = ImageUpload.MaxRequestBytes)]
+    [DisableFormValueModelBinding]
+    public async Task<IActionResult> UploadCover(Guid id, CancellationToken ct)
+    {
+        var userId = CurrentUserId;
+        if (userId is null) return Failure(ErrorCodes.Unauthenticated);
+
+        var (file, invalid) = await ReadUploadAsync(ct);
+        if (invalid is not null) return Failure(invalid);
+
+        await using var stream = file!.OpenReadStream();
+        var result = await _trips.SetCoverAsync(id, userId.Value, stream, ct);
+
+        return result.Success ? Ok(new { image = result.Data }) : Failure(result.Error!);
+    }
+
+    // DELETE /api/trip/{id}/cover — 204 · 403 TRIP_FORBIDDEN · 404 TRIP_NOT_FOUND
+    [HttpDelete("{id:guid}/cover")]
+    public async Task<IActionResult> RemoveCover(Guid id, CancellationToken ct)
+    {
+        var userId = CurrentUserId;
+        if (userId is null) return Failure(ErrorCodes.Unauthenticated);
+
+        var result = await _trips.RemoveCoverAsync(id, userId.Value, ct);
+
+        return result.Success ? NoContent() : Failure(result.Error!);
+    }
+
     // DELETE /api/trip/{id} — 204 · 403 TRIP_FORBIDDEN · 404 TRIP_NOT_FOUND
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken ct)

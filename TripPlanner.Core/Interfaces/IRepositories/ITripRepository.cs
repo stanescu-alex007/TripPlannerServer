@@ -39,8 +39,11 @@ namespace TripPlanner.Core.Interfaces.IRepositories
         /// </summary>
         Task RestoreAsync(Trip trip, CancellationToken ct = default);
 
-        /// <summary>Physically removes trips deleted before the cutoff. Returns how many.</summary>
-        Task<int> PurgeDeletedBeforeAsync(DateTime cutoff, CancellationToken ct = default);
+        /// <summary>
+        /// Physically removes trips deleted before the cutoff. Returns the cover of each
+        /// one removed (null where it had none), so the files can go with them.
+        /// </summary>
+        Task<IReadOnlyList<string?>> PurgeDeletedBeforeAsync(DateTime cutoff, CancellationToken ct = default);
 
         /// <summary>
         /// Every live trip the user owns or holds a seat on — declined seats included —

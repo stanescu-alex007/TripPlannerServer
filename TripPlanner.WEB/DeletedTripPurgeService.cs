@@ -1,5 +1,6 @@
 using TripPlanner.Core.Common;
 using TripPlanner.Core.Interfaces.IRepositories;
+using TripPlanner.Core.Interfaces.IServices;
 
 namespace TripPlanner.WEB;
 
@@ -42,11 +43,16 @@ public sealed class DeletedTripPurgeService : BackgroundService
                 await using var scope = _scopeFactory.CreateAsyncScope();
 
                 var trips = scope.ServiceProvider.GetRequiredService<ITripRepository>();
-                var purged = await trips.PurgeDeletedBeforeAsync(cutoff, stoppingToken);
+                var covers = await trips.PurgeDeletedBeforeAsync(cutoff, stoppingToken);
 
-                if (purged > 0)
+                // After the rows are gone, so a failed purge never leaves a trip without its cover.
+                var storage = scope.ServiceProvider.GetRequiredService<IImageStorage>();
+                foreach (var cover in covers)
+                    await storage.DeleteAsync(cover, stoppingToken);
+
+                if (covers.Count > 0)
                     _logger.LogInformation(
-                        "Purged {Count} trip(s) deleted before {Cutoff:u}.", purged, cutoff);
+                        "Purged {Count} trip(s) deleted before {Cutoff:u}.", covers.Count, cutoff);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {

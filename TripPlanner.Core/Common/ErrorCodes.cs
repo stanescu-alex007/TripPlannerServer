@@ -349,6 +349,28 @@ public static class ErrorCodes
         "An invitation was just sent. Wait a moment before sending another.",
         ErrorType.TooManyRequests);
 
+    // ── Images ────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Not a JPEG, PNG or WebP — judged by decoding the file, never by its name or the
+    /// Content-Type the client claimed. Also covers corrupt files and absurd dimensions.
+    /// </summary>
+    public static readonly Error ImageInvalid = new(
+        "IMAGE_INVALID",
+        "This file is not a supported image. Use a JPEG, PNG or WebP photo.",
+        ErrorType.Validation);
+
+    public static readonly Error ImageTooLarge = new(
+        "IMAGE_TOO_LARGE",
+        "This image is too large. The limit is 20 MB.",
+        ErrorType.Validation);
+
+    /// <summary>No file in the request, or an empty one.</summary>
+    public static readonly Error ImageMissing = new(
+        "IMAGE_MISSING",
+        "Choose an image to upload.",
+        ErrorType.Validation);
+
     // ── Contact ───────────────────────────────────────────────────────────────
 
     /// <summary>
