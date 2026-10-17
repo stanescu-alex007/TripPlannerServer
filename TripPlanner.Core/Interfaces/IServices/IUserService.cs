@@ -8,6 +8,11 @@ namespace TripPlanner.Core.Interfaces.IServices
 
         Task<Result<UserDto>> UpdateAsync(Guid userId, UpdateUserRequest request, CancellationToken ct = default);
 
+        /// <summary>Processes and stores a new profile photo, replacing (and deleting) the old one.</summary>
+        Task<Result<UserDto>> SetPhotoAsync(Guid userId, Stream file, CancellationToken ct = default);
+
+        Task<Result<UserDto>> RemovePhotoAsync(Guid userId, CancellationToken ct = default);
+
         /// <summary>
         /// Soft-deletes the account and revokes every session. Requires the current
         /// password, like every other action that cannot be undone or weakens the

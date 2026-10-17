@@ -14,6 +14,8 @@ namespace TripPlanner.BusinessLogic.Services
         private readonly ITripOwnershipService _ownership;
         private readonly IPasswordService _passwords;
         private readonly IRefreshTokenRepository _refreshTokens;
+        private readonly IImageProcessor _imageProcessor;
+        private readonly IImageStorage _imageStorage;
         private readonly IUnitOfWork _unitOfWork;
         private readonly TimeProvider _clock;
 
@@ -23,6 +25,8 @@ namespace TripPlanner.BusinessLogic.Services
             ITripOwnershipService ownership,
             IPasswordService passwords,
             IRefreshTokenRepository refreshTokens,
+            IImageProcessor imageProcessor,
+            IImageStorage imageStorage,
             IUnitOfWork unitOfWork,
             TimeProvider clock)
         {
@@ -31,6 +35,8 @@ namespace TripPlanner.BusinessLogic.Services
             _ownership = ownership;
             _passwords = passwords;
             _refreshTokens = refreshTokens;
+            _imageProcessor = imageProcessor;
+            _imageStorage = imageStorage;
             _unitOfWork = unitOfWork;
             _clock = clock;
         }
@@ -54,9 +60,6 @@ namespace TripPlanner.BusinessLogic.Services
             user.LastName = request.LastName.Trim();
             user.Phone = string.IsNullOrWhiteSpace(request.Phone) ? null : request.Phone.Trim();
 
-            if (request.ImageUrl is not null)
-                user.ImageUrl = string.IsNullOrWhiteSpace(request.ImageUrl) ? null : request.ImageUrl.Trim();
-
             if (request.BirthDate is not null)
                 user.BirthDate = DateTime.SpecifyKind(request.BirthDate.Value.Date, DateTimeKind.Utc);
 
@@ -64,6 +67,52 @@ namespace TripPlanner.BusinessLogic.Services
 
             // Return the saved state so the client renders what the server actually holds,
             // rather than optimistically echoing what it sent.
+            return Result<UserDto>.Ok(MapToDto(user));
+        }
+
+        public async Task<Result<UserDto>> SetPhotoAsync(
+            Guid userId, Stream file, CancellationToken ct = default)
+        {
+            var user = await _users.GetByIdAsync(userId, ct);
+            if (user is null) return Result<UserDto>.Fail(ErrorCodes.UserNotFound);
+
+            var processed = await _imageProcessor.ProcessAsync(file, ImageKind.Avatar, ct);
+            if (!processed.Success) return Result<UserDto>.Fail(processed.Error!);
+
+            var previous = user.ImageUrl;
+            var url = await _imageStorage.SaveAsync(ImageFolders.Avatars, processed.Data!, ct);
+
+            user.ImageUrl = url;
+
+            try
+            {
+                await _users.UpdateAsync(user, ct);
+            }
+            catch
+            {
+                // Nothing points at the new file, so it must not linger.
+                await _imageStorage.DeleteAsync(url, CancellationToken.None);
+                throw;
+            }
+
+            // Only once the new URL is saved — the old photo stays until nothing uses it.
+            await _imageStorage.DeleteAsync(previous, ct);
+
+            return Result<UserDto>.Ok(MapToDto(user));
+        }
+
+        public async Task<Result<UserDto>> RemovePhotoAsync(Guid userId, CancellationToken ct = default)
+        {
+            var user = await _users.GetByIdAsync(userId, ct);
+            if (user is null) return Result<UserDto>.Fail(ErrorCodes.UserNotFound);
+
+            var previous = user.ImageUrl;
+            if (previous is null) return Result<UserDto>.Ok(MapToDto(user));
+
+            user.ImageUrl = null;
+            await _users.UpdateAsync(user, ct);
+            await _imageStorage.DeleteAsync(previous, ct);
+
             return Result<UserDto>.Ok(MapToDto(user));
         }
 
@@ -80,6 +129,9 @@ namespace TripPlanner.BusinessLogic.Services
 
             if (!_passwords.Verify(password, user.PasswordHash))
                 return Result.Fail(ErrorCodes.CurrentPasswordIncorrect);
+
+            // Read before the delete, which anonymizes the row and clears it.
+            var photo = user.ImageUrl;
 
             IReadOnlyList<OwnershipOfferNotice> offers;
 
@@ -111,6 +163,9 @@ namespace TripPlanner.BusinessLogic.Services
 
             // Only once the deletion has committed — never mail an offer that rolled back.
             await _ownership.NotifyCandidatesAsync(offers, ct);
+
+            // The photo is personal data like the rest; erased with the account.
+            await _imageStorage.DeleteAsync(photo, ct);
 
             return Result.Ok();
         }

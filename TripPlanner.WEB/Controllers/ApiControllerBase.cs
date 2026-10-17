@@ -20,6 +20,39 @@ public abstract class ApiControllerBase : ControllerBase
             message = error.Message
         });
 
+    /// <summary>
+    /// Reads the "file" field of a multipart upload, checking only presence and size —
+    /// whether it is really an image is decided by decoding it, never by its name or
+    /// Content-Type. Read by hand rather than bound as a parameter: binding turns a body
+    /// over the limit into a generic VALIDATION_FAILED instead of IMAGE_TOO_LARGE.
+    /// </summary>
+    protected async Task<(IFormFile? File, Error? Error)> ReadUploadAsync(CancellationToken ct)
+    {
+        if (!Request.HasFormContentType) return (null, ErrorCodes.ImageMissing);
+
+        IFormCollection form;
+
+        try
+        {
+            form = await Request.ReadFormAsync(ct);
+        }
+        catch (BadHttpRequestException ex) when (ex.StatusCode == StatusCodes.Status413PayloadTooLarge)
+        {
+            return (null, ErrorCodes.ImageTooLarge);
+        }
+        catch (Exception ex) when (ex is BadHttpRequestException or InvalidDataException)
+        {
+            return (null, ErrorCodes.ValidationFailed);
+        }
+
+        return form.Files.GetFile("file") switch
+        {
+            null or { Length: 0 } => (null, ErrorCodes.ImageMissing),
+            { Length: > ImageUpload.MaxFileBytes } => (null, ErrorCodes.ImageTooLarge),
+            var file => (file, null)
+        };
+    }
+
     protected static int StatusCodeFor(ErrorType type) => type switch
     {
         ErrorType.Validation => StatusCodes.Status400BadRequest,

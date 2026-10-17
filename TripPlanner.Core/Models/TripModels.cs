@@ -83,8 +83,8 @@ namespace TripPlanner.Core.Models
         [Required, MaxLength(50)]
         public string TransportType { get; set; } = "plane";
 
-        [MaxLength(500)]
-        public string? Image { get; set; }
+        // No Image: the cover is uploaded through POST /api/trip/{id}/cover, never set
+        // to an arbitrary URL (see UpdateUserRequest for why).
 
         [MaxLength(2000)]
         public string? Description { get; set; }

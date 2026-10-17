@@ -17,6 +17,14 @@ namespace TripPlanner.Core.Interfaces.IServices
 
         Task<Result> UpdateTripAsync(Guid tripId, Guid requesterId, UpdateTripRequest request, CancellationToken ct = default);
 
+        /// <summary>
+        /// Processes and stores a new cover, replacing (and deleting) the old one. Same
+        /// rule as editing the trip: owner or a confirmed Admin. Returns the new URL.
+        /// </summary>
+        Task<Result<string>> SetCoverAsync(Guid tripId, Guid requesterId, Stream file, CancellationToken ct = default);
+
+        Task<Result> RemoveCoverAsync(Guid tripId, Guid requesterId, CancellationToken ct = default);
+
         Task<Result> DeleteTripAsync(Guid tripId, Guid requesterId, CancellationToken ct = default);
 
         Task<Result> AddParticipantAsync(Guid tripId, Guid requesterId, AddParticipantRequest request, CancellationToken ct = default);

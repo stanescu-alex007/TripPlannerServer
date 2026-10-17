@@ -1,7 +1,9 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Extensions.FileProviders;
 using TripPlanner.BusinessLogic.DependencyInjection;
 using TripPlanner.Infrastructure.DependencyInjection;
+using TripPlanner.Infrastructure.Images;
 using TripPlanner.WEB;
 using TripPlanner.WEB.DependencyInjection;
 using TripPlanner.WEB.Middleware;
@@ -46,6 +48,7 @@ builder.Services.AddSwaggerWithAuth();
 
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddEmailSending(builder.Configuration);
+builder.Services.AddImageStorage(builder.Configuration);
 builder.Services.AddJwtAuthentication(authSettings);
 builder.Services.AddBusinessLogic(builder.Configuration);
 builder.Services.AddAuthRateLimiting();
@@ -83,6 +86,18 @@ if (!app.Environment.IsDevelopment())
 {
     app.UseHsts();
     app.UseHttpsRedirection();
+}
+
+// Local image storage only (development): serve the upload folder under /uploads.
+// In production images come from the R2 bucket's own domain and never touch the API.
+if (app.Services.GetService<LocalImageStorage>() is { } localImages)
+{
+    Directory.CreateDirectory(localImages.RootDirectory);
+    app.UseStaticFiles(new StaticFileOptions
+    {
+        FileProvider = new PhysicalFileProvider(localImages.RootDirectory),
+        RequestPath = "/uploads"
+    });
 }
 
 app.UseCors(CorsPolicy);

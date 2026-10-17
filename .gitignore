@@ -363,3 +363,4 @@ MigrationBackup/
 FodyWeavers.xsd
 # Local dev: emails written to disk instead of being sent
 _sent-emails/
+_uploads/

@@ -35,6 +35,12 @@ public static class RateLimitPolicies
     /// authenticated, and users behind one NAT must not share a bucket.
     /// </summary>
     public const string Contact = "contact";
+
+    /// <summary>
+    /// Photo and cover uploads. Each one is decoded and resized, which costs real CPU and
+    /// memory, so a script must not be able to loop on it. Keyed on the user.
+    /// </summary>
+    public const string Uploads = "uploads";
 }
 
 public static class RateLimitingServiceCollectionExtensions
@@ -68,6 +74,7 @@ public static class RateLimitingServiceCollectionExtensions
             options.AddPolicy(RateLimitPolicies.Sensitive, PartitionByIp(permit: 10, perMinutes: 15));
             options.AddPolicy(RateLimitPolicies.Refresh, PartitionByIp(permit: 60, perMinutes: 1));
             options.AddPolicy(RateLimitPolicies.Contact, PartitionByUser(permit: 3, perMinutes: 60));
+            options.AddPolicy(RateLimitPolicies.Uploads, PartitionByUser(permit: 20, perMinutes: 10));
         });
 
         return services;
