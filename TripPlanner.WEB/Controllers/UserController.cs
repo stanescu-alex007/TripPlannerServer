@@ -39,6 +39,39 @@ public class UserController : ApiControllerBase
         return result.Success ? Ok(result.Data) : Failure(result.Error!);
     }
 
+    // POST /api/user/me/photo — multipart/form-data, field "file"
+    // 200 UserDto · 400 IMAGE_MISSING | IMAGE_TOO_LARGE | IMAGE_INVALID · 401 · 404 · 429
+    [HttpPost("me/photo")]
+    [EnableRateLimiting(RateLimitPolicies.Uploads)]
+    [RequestSizeLimit(ImageUpload.MaxRequestBytes)]
+    [RequestFormLimits(MultipartBodyLengthLimit = ImageUpload.MaxRequestBytes)]
+    [DisableFormValueModelBinding]
+    public async Task<IActionResult> UploadPhoto(CancellationToken ct)
+    {
+        var userId = CurrentUserId;
+        if (userId is null) return Failure(ErrorCodes.Unauthenticated);
+
+        var (file, invalid) = await ReadUploadAsync(ct);
+        if (invalid is not null) return Failure(invalid);
+
+        await using var stream = file!.OpenReadStream();
+        var result = await _users.SetPhotoAsync(userId.Value, stream, ct);
+
+        return result.Success ? Ok(result.Data) : Failure(result.Error!);
+    }
+
+    // DELETE /api/user/me/photo — 200 UserDto · 401 · 404
+    [HttpDelete("me/photo")]
+    public async Task<IActionResult> RemovePhoto(CancellationToken ct)
+    {
+        var userId = CurrentUserId;
+        if (userId is null) return Failure(ErrorCodes.Unauthenticated);
+
+        var result = await _users.RemovePhotoAsync(userId.Value, ct);
+
+        return result.Success ? Ok(result.Data) : Failure(result.Error!);
+    }
+
     // POST /api/user/me/export — body { "password": "..." }
     // 200 UserDataExport · 400 AUTH_CURRENT_PASSWORD_INCORRECT | AUTH_PASSWORD_NOT_SET | VALIDATION_FAILED
     // 401 · 404 · 429 AUTH_TOO_MANY_ATTEMPTS

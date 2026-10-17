@@ -17,6 +17,8 @@ namespace TripPlanner.BusinessLogic.Services
         private readonly IUserRepository _users;
         private readonly ITripInvitationService _invitations;
         private readonly ITripOwnershipService _ownership;
+        private readonly IImageProcessor _imageProcessor;
+        private readonly IImageStorage _imageStorage;
         private readonly IUnitOfWork _unitOfWork;
         private readonly TimeProvider _clock;
 
@@ -25,6 +27,8 @@ namespace TripPlanner.BusinessLogic.Services
             IUserRepository users,
             ITripInvitationService invitations,
             ITripOwnershipService ownership,
+            IImageProcessor imageProcessor,
+            IImageStorage imageStorage,
             IUnitOfWork unitOfWork,
             TimeProvider clock)
         {
@@ -32,6 +36,8 @@ namespace TripPlanner.BusinessLogic.Services
             _users = users;
             _invitations = invitations;
             _ownership = ownership;
+            _imageProcessor = imageProcessor;
+            _imageStorage = imageStorage;
             _unitOfWork = unitOfWork;
             _clock = clock;
         }
@@ -85,7 +91,6 @@ namespace TripPlanner.BusinessLogic.Services
                     Budget = request.Budget,
                     Currency = NormalizeCurrency(request.Currency),
                     TransportType = request.TransportType.ToLowerInvariant(),
-                    Image = request.Image,
                     Description = request.Description
                 }, token);
 
@@ -139,7 +144,6 @@ namespace TripPlanner.BusinessLogic.Services
             trip.Currency = NormalizeCurrency(request.Currency);
             trip.TransportType = request.TransportType.ToLowerInvariant();
             trip.Description = request.Description;
-            if (request.Image is not null) trip.Image = request.Image;
 
             var rosterChanged = request.Participants is not null
                                 && TripAccess.IsOwner(trip, requesterId);
@@ -164,6 +168,57 @@ namespace TripPlanner.BusinessLogic.Services
             // newly added get an email — anyone with a live invitation is skipped.
             if (rosterChanged)
                 await _invitations.SendPendingForTripAsync(tripId, ct);
+
+            return Result.Ok();
+        }
+
+        public async Task<Result<string>> SetCoverAsync(
+            Guid tripId, Guid requesterId, Stream file, CancellationToken ct = default)
+        {
+            var trip = await _trips.GetByIdWithDetailsAsync(tripId, ct);
+
+            if (trip is null) return Result<string>.Fail(ErrorCodes.TripNotFound);
+            if (!TripAccess.CanView(trip, requesterId)) return Result<string>.Fail(ErrorCodes.TripNotFound);
+            if (!TripAccess.CanManage(trip, requesterId)) return Result<string>.Fail(ErrorCodes.TripForbidden);
+
+            var processed = await _imageProcessor.ProcessAsync(file, ImageKind.TripCover, ct);
+            if (!processed.Success) return Result<string>.Fail(processed.Error!);
+
+            var previous = trip.Image;
+            var url = await _imageStorage.SaveAsync(ImageFolders.TripCovers, processed.Data!, ct);
+
+            trip.Image = url;
+
+            try
+            {
+                await _trips.UpdateAsync(trip, ct);
+            }
+            catch
+            {
+                // Nothing points at the new file, so it must not linger.
+                await _imageStorage.DeleteAsync(url, CancellationToken.None);
+                throw;
+            }
+
+            await _imageStorage.DeleteAsync(previous, ct);
+
+            return Result<string>.Ok(url);
+        }
+
+        public async Task<Result> RemoveCoverAsync(Guid tripId, Guid requesterId, CancellationToken ct = default)
+        {
+            var trip = await _trips.GetByIdWithDetailsAsync(tripId, ct);
+
+            if (trip is null) return Result.Fail(ErrorCodes.TripNotFound);
+            if (!TripAccess.CanView(trip, requesterId)) return Result.Fail(ErrorCodes.TripNotFound);
+            if (!TripAccess.CanManage(trip, requesterId)) return Result.Fail(ErrorCodes.TripForbidden);
+
+            var previous = trip.Image;
+            if (previous is null) return Result.Ok();
+
+            trip.Image = null;
+            await _trips.UpdateAsync(trip, ct);
+            await _imageStorage.DeleteAsync(previous, ct);
 
             return Result.Ok();
         }

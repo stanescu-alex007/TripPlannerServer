@@ -139,15 +139,17 @@ namespace TripPlanner.Infrastructure.Repositories
                     .SetProperty(t => t.UpdatedAt, now), ct);
         }
 
-        public async Task<int> PurgeDeletedBeforeAsync(DateTime cutoff, CancellationToken ct = default)
+        public async Task<IReadOnlyList<string?>> PurgeDeletedBeforeAsync(DateTime cutoff, CancellationToken ct = default)
         {
-            var tripIds = await _context.Trips
+            var doomed = await _context.Trips
                 .IgnoreQueryFilters()
                 .Where(t => t.DeletedAt != null && t.DeletedAt < cutoff)
-                .Select(t => t.Id)
+                .Select(t => new { t.Id, t.Image })
                 .ToListAsync(ct);
 
-            if (tripIds.Count == 0) return 0;
+            if (doomed.Count == 0) return [];
+
+            var tripIds = doomed.Select(t => t.Id).ToList();
 
             var seatIds = await _context.TripParticipants
                 .IgnoreQueryFilters()
@@ -183,7 +185,7 @@ namespace TripPlanner.Infrastructure.Repositories
                 .Where(t => tripIds.Contains(t.Id))
                 .ExecuteDeleteAsync(ct);
 
-            return tripIds.Count;
+            return doomed.Select(t => t.Image).ToList();
         }
 
         public Task<List<Trip>> GetForExportAsync(Guid userId, CancellationToken ct = default) =>

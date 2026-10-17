@@ -22,6 +22,11 @@ namespace TripPlanner.Core.Models
     /// Email is intentionally absent: changing it has to re-verify the new address, so it
     /// needs its own flow rather than riding along with the profile. The frontend used to
     /// send it here and silently have it dropped.
+    /// <para>
+    /// The photo is absent too: it is uploaded through <c>POST /api/user/me/photo</c>.
+    /// Accepting any URL here let someone point their avatar at a server they control and
+    /// learn the IP address of everyone who looked at it.
+    /// </para>
     /// </summary>
     public class UpdateUserRequest
     {
@@ -33,10 +38,6 @@ namespace TripPlanner.Core.Models
 
         [Phone, MaxLength(30)]
         public string? Phone { get; set; }
-
-        [MaxLength(500)]
-        [RegularExpression(@"^https?://.+", ErrorMessage = "ImageUrl must be an http(s) URL.")]
-        public string? ImageUrl { get; set; }
 
         public DateTime? BirthDate { get; set; }
     }
