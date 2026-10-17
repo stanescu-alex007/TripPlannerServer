@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using TripPlanner.BusinessLogic.DependencyInjection;
+using TripPlanner.Core.Models;
 using TripPlanner.Infrastructure.DependencyInjection;
 using TripPlanner.WEB;
 using TripPlanner.WEB.DependencyInjection;
@@ -28,7 +29,8 @@ builder.Services.AddCors(options =>
               .AllowCredentials()); // needed for the HttpOnly refresh cookie
 });
 
-builder.Services.AddControllers()
+// Every response is wrapped in { code, messageKey, timestamp, data }.
+builder.Services.AddControllers(options => options.Filters.Add<ApiEnvelopeFilter>())
     .AddJsonOptions(opts =>
     {
         opts.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
@@ -36,7 +38,7 @@ builder.Services.AddControllers()
     })
     .ConfigureApiBehaviorOptions(options =>
     {
-        // Model-binding failures must use the same {code, message} envelope as
+        // Model-binding failures must use the same envelope as
         // everything else, instead of the framework's ValidationProblemDetails.
         options.InvalidModelStateResponseFactory = ApiValidation.BuildResponse;
     });
@@ -96,5 +98,14 @@ app.UseRateLimiter();
 app.UseAuthorization();
 
 app.MapControllers();
+
+// A route no controller matches never reaches the envelope filter; without this it
+// would be the only response with an empty body.
+app.MapFallback(context =>
+{
+    context.Response.StatusCode = StatusCodes.Status404NotFound;
+    return context.Response.WriteAsJsonAsync(ApiResponse.Failure(
+        StatusCodes.Status404NotFound, ApiResponse.MessageKeyForStatus(StatusCodes.Status404NotFound)));
+});
 
 app.Run();

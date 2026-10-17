@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
 using TripPlanner.Core.Common;
+using TripPlanner.Core.Models;
 using TripPlanner.Core.Interfaces.IRepositories;
 
 namespace TripPlanner.Infrastructure.DependencyInjection
@@ -46,7 +47,7 @@ namespace TripPlanner.Infrastructure.DependencyInjection
                     // after all of those.
                     OnTokenValidated = EnsureSessionIsLive,
 
-                    // Emit the same {code, message} body the rest of the API uses, instead
+                    // Emit the same envelope the rest of the API uses, instead
                     // of the framework's empty 401/403.
                     OnChallenge = async context =>
                     {
@@ -94,7 +95,7 @@ namespace TripPlanner.Infrastructure.DependencyInjection
             response.StatusCode = error.Type == ErrorType.Forbidden ? 403 : 401;
             response.ContentType = "application/json";
 
-            await response.WriteAsJsonAsync(new { code = error.Code, message = error.Message });
+            await response.WriteAsJsonAsync(ApiResponse.Failure(response.StatusCode, error));
         }
     }
 }

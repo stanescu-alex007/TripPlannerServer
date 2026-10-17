@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Mvc;
 using TripPlanner.Core.Common;
+using TripPlanner.Core.Models;
 using TripPlanner.Core.Interfaces.IServices;
 
 namespace TripPlanner.WEB.Controllers;
@@ -13,12 +14,11 @@ namespace TripPlanner.WEB.Controllers;
 public abstract class ApiControllerBase : ControllerBase
 {
     /// <summary>Shape of every error body: <c>{ "code": "...", "message": "..." }</c>.</summary>
-    protected IActionResult Failure(Error error) =>
-        StatusCode(StatusCodeFor(error.Type), new
-        {
-            code = error.Code,
-            message = error.Message
-        });
+    protected IActionResult Failure(Error error)
+    {
+        var status = StatusCodeFor(error.Type);
+        return StatusCode(status, ApiResponse.Failure(status, error));
+    }
 
     protected static int StatusCodeFor(ErrorType type) => type switch
     {

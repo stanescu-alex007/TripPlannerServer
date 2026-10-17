@@ -1,4 +1,5 @@
 using TripPlanner.Core.Common;
+using TripPlanner.Core.Models;
 
 namespace TripPlanner.WEB.Middleware;
 
@@ -46,11 +47,8 @@ public sealed class ExceptionHandlingMiddleware
             context.Response.StatusCode = StatusCodes.Status409Conflict;
             context.Response.ContentType = "application/json";
 
-            await context.Response.WriteAsJsonAsync(new
-            {
-                code = ErrorCodes.ConcurrencyConflict.Code,
-                message = ErrorCodes.ConcurrencyConflict.Message
-            });
+            await context.Response.WriteAsJsonAsync(
+                ApiResponse.Failure(StatusCodes.Status409Conflict, ErrorCodes.ConcurrencyConflict));
         }
         catch (Exception ex)
         {
@@ -65,14 +63,10 @@ public sealed class ExceptionHandlingMiddleware
             context.Response.StatusCode = StatusCodes.Status500InternalServerError;
             context.Response.ContentType = "application/json";
 
-            await context.Response.WriteAsJsonAsync(new
-            {
-                code = ErrorCodes.Internal.Code,
-                message = ErrorCodes.Internal.Message,
-
-                // Details only in development; production callers get nothing exploitable.
-                detail = _env.IsDevelopment() ? ex.ToString() : null
-            });
+            // No exception details in the body, in any environment: the full exception
+            // is in the log line above, and errors always carry data = null.
+            await context.Response.WriteAsJsonAsync(
+                ApiResponse.Failure(StatusCodes.Status500InternalServerError, ErrorCodes.Internal));
         }
     }
 }
