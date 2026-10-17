@@ -13,20 +13,26 @@ namespace TripPlanner.BusinessLogic.Services
         private readonly ITripRepository _trips;
         private readonly ITripOwnershipService _ownership;
         private readonly IPasswordService _passwords;
+        private readonly IRefreshTokenRepository _refreshTokens;
         private readonly IUnitOfWork _unitOfWork;
+        private readonly TimeProvider _clock;
 
         public UserService(
             IUserRepository users,
             ITripRepository trips,
             ITripOwnershipService ownership,
             IPasswordService passwords,
-            IUnitOfWork unitOfWork)
+            IRefreshTokenRepository refreshTokens,
+            IUnitOfWork unitOfWork,
+            TimeProvider clock)
         {
             _users = users;
             _trips = trips;
             _ownership = ownership;
             _passwords = passwords;
+            _refreshTokens = refreshTokens;
             _unitOfWork = unitOfWork;
+            _clock = clock;
         }
 
         public async Task<Result<UserDto>> GetMeAsync(Guid userId, CancellationToken ct = default)
@@ -107,6 +113,90 @@ namespace TripPlanner.BusinessLogic.Services
             await _ownership.NotifyCandidatesAsync(offers, ct);
 
             return Result.Ok();
+        }
+
+        public async Task<Result<UserDataExport>> ExportAsync(
+            Guid userId, string password, CancellationToken ct = default)
+        {
+            var user = await _users.GetByIdAsync(userId, ct);
+            if (user is null) return Result<UserDataExport>.Fail(ErrorCodes.UserNotFound);
+
+            // The whole account in one file: a lifted access token must not be enough.
+            if (user.PasswordHash is null) return Result<UserDataExport>.Fail(ErrorCodes.PasswordNotSet);
+
+            if (!_passwords.Verify(password, user.PasswordHash))
+                return Result<UserDataExport>.Fail(ErrorCodes.CurrentPasswordIncorrect);
+
+            var trips = await _trips.GetForExportAsync(userId, ct);
+            var sessions = await _refreshTokens.GetActiveSessionsAsync(userId, ct);
+
+            return Result<UserDataExport>.Ok(new UserDataExport
+            {
+                ExportedAt = _clock.GetUtcNow().UtcDateTime,
+                Profile = new ExportedProfile
+                {
+                    Id = user.Id,
+                    Email = user.Email,
+                    FirstName = user.FirstName,
+                    LastName = user.LastName,
+                    Phone = user.Phone,
+                    ImageUrl = user.ImageUrl,
+                    BirthDate = user.BirthDate,
+                    CreatedAt = user.CreatedAt,
+                    EmailVerifiedAt = user.EmailVerifiedAt,
+                    TermsAcceptedAt = user.TermsAcceptedAt,
+                    PasswordChangedAt = user.PasswordChangedAt,
+                    TwoFactorEnabledAt = user.TwoFactorEnabledAt
+                },
+                Trips = trips.Select(t => MapToExport(t, userId)).ToList(),
+                ActiveSessions = sessions.Select(s => new ExportedSession
+                {
+                    IpAddress = s.CreatedByIp,
+                    UserAgent = s.UserAgent,
+                    CreatedAt = s.CreatedAt,
+                    ExpiresAt = s.ExpiresAt
+                }).ToList()
+            });
+        }
+
+        private static ExportedTrip MapToExport(Trip trip, Guid userId)
+        {
+            var seat = trip.Participants.FirstOrDefault(p => p.UserId == userId);
+
+            return new ExportedTrip
+            {
+                Id = trip.Id,
+                Name = trip.Name,
+                Location = trip.Location,
+                StartDate = trip.StartDate,
+                EndDate = trip.EndDate,
+                Budget = trip.Budget,
+                Currency = trip.Currency,
+                TransportType = trip.TransportType,
+                Description = trip.Description,
+                Image = trip.Image,
+                CreatedAt = trip.CreatedAt,
+                IsOwner = trip.OwnerId == userId,
+                MyNickname = seat?.Nickname,
+                MyRole = seat?.Role,
+                MyStatus = seat?.Status,
+                OtherParticipants = trip.Participants
+                    .Where(p => p.UserId != userId)
+                    .Select(p => p.Nickname)
+                    .ToList(),
+                Schedule = trip.ScheduleItems
+                    .OrderBy(s => s.Date).ThenBy(s => s.Order)
+                    .Select(s => new ExportedScheduleItem
+                    {
+                        Date = s.Date,
+                        StartTime = s.StartTime,
+                        EndTime = s.EndTime,
+                        Title = s.Title,
+                        Description = s.Description,
+                        Status = s.Status
+                    })
+                    .ToList()
+            };
         }
 
         private static UserDto MapToDto(User user) => new()

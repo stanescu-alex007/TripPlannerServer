@@ -80,11 +80,37 @@ namespace TripPlanner.Infrastructure.Repositories
             user.TwoFactorSecret = null;
             user.TwoFactorEnabledAt = null;
 
+            // Anonymized, not just hidden: GDPR's right to erasure means the person can
+            // no longer be identified from what is left. The row stays only so trips,
+            // seats and history that point at it keep a valid reference.
+            var placeholderEmail = AnonymizedEmail(user.Id);
+            user.FirstName = "Deleted";
+            user.LastName = "user";
+            user.Email = placeholderEmail;
+            user.Phone = null;
+            user.ImageUrl = null;
+            user.BirthDate = null;
+            user.FailedLoginAttempts = 0;
+            user.LastFailedLoginAt = null;
+
+            var now = _clock.GetUtcNow().UtcDateTime;
+
+            // Seats on other people's trips carry the address and the nickname too —
+            // including seats removed earlier, which the query filter would hide.
+            // Bulk update — bypasses the audit interceptor, so UpdatedAt is set here.
+            await _context.TripParticipants
+                .IgnoreQueryFilters()
+                .Where(p => p.UserId == user.Id)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(p => p.Email, placeholderEmail)
+                    .SetProperty(p => p.Nickname, "Deleted user")
+                    .SetProperty(p => p.UpdatedAt, now), ct);
+
             // Stamped here rather than through Remove(). Remove runs EF's in-memory
             // cascade before any interceptor sees it: tracked participant rows would have
             // their UserId nulled, and the Restrict relationship to owned trips would
             // throw — neither of which a soft delete wants.
-            user.DeletedAt = _clock.GetUtcNow().UtcDateTime;
+            user.DeletedAt = now;
 
             // Same reasoning as UpdateAsync: only a detached entity needs Update().
             if (_context.Entry(user).State == EntityState.Detached)
@@ -180,6 +206,12 @@ namespace TripPlanner.Infrastructure.Repositories
 
             return affected > 0;
         }
+
+        /// <summary>
+        /// Unique per account, so the filtered unique indexes never see two equal values,
+        /// and on the reserved <c>.invalid</c> domain, so nothing can ever be mailed to it.
+        /// </summary>
+        private static string AnonymizedEmail(Guid userId) => $"deleted-{userId:N}@deleted.invalid";
 
         /// <summary>
         /// Records a value a bulk statement has already written. Both the current and the

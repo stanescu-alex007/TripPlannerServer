@@ -31,6 +31,14 @@ namespace TripPlanner.Core.Entities
 
         public bool IsEmailVerified => EmailVerifiedAt.HasValue;
 
+        /// <summary>
+        /// When the user accepted the Terms and the Privacy Policy at registration — the
+        /// record GDPR expects to be able to show. Null for accounts created before the
+        /// checkbox was sent to the server. Kept through anonymization: it says nothing
+        /// about who the person was.
+        /// </summary>
+        public DateTime? TermsAcceptedAt { get; set; }
+
         /// <summary>Stamped on every password change or reset.</summary>
         public DateTime? PasswordChangedAt { get; set; }
 
