@@ -13,10 +13,12 @@ namespace TripPlanner.Infrastructure.Images;
 public sealed class R2ImageStorage : IImageStorage
 {
     /// <summary>
-    /// Names are never reused, so a file never changes behind its URL: browsers and
-    /// Cloudflare may keep it for a year without ever asking again.
+    /// Names are never reused, so a file never changes behind its URL: browsers may keep
+    /// it for a year without asking again. Cloudflare's edge only for an hour (s-maxage),
+    /// so a deleted image — a replaced photo, an erased account — stops being served to
+    /// anyone holding the old link within the hour instead of lingering in the CDN.
     /// </summary>
-    private const string CacheControl = "public, max-age=31536000, immutable";
+    private const string CacheControl = "public, max-age=31536000, s-maxage=3600, immutable";
 
     private readonly IAmazonS3 _s3;
     private readonly ImageOptions _options;
