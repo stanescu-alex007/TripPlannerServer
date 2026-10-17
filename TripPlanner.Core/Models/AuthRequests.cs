@@ -23,6 +23,13 @@ namespace TripPlanner.Core.Models
 
         [Required, MaxLength(200)]
         public string Password { get; set; } = string.Empty;
+
+        /// <summary>
+        /// The Terms and Privacy Policy checkbox. Checked on the server too: the
+        /// acceptance is stored as a fact, so it must not rest on the client alone.
+        /// </summary>
+        [Range(typeof(bool), "true", "true", ErrorMessage = "You must accept the Terms and the Privacy Policy.")]
+        public bool AcceptTerms { get; set; }
     }
 
     public class LoginRequest

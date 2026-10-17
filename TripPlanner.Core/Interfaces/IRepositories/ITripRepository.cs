@@ -42,6 +42,12 @@ namespace TripPlanner.Core.Interfaces.IRepositories
         /// <summary>Physically removes trips deleted before the cutoff. Returns how many.</summary>
         Task<int> PurgeDeletedBeforeAsync(DateTime cutoff, CancellationToken ct = default);
 
+        /// <summary>
+        /// Every live trip the user owns or holds a seat on — declined seats included —
+        /// with its roster and schedule, for the personal data export.
+        /// </summary>
+        Task<List<Trip>> GetForExportAsync(Guid userId, CancellationToken ct = default);
+
         /// <summary>Soft-deletes the user's seat on every trip they belong to.</summary>
         Task RemoveUserFromAllTripsAsync(Guid userId, CancellationToken ct = default);
 

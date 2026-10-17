@@ -475,6 +475,9 @@ namespace TripPlanner.Infrastructure.Migrations
                         .HasMaxLength(30)
                         .HasColumnType("character varying(30)");
 
+                    b.Property<DateTime?>("TermsAcceptedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTime?>("TwoFactorEnabledAt")
                         .HasColumnType("timestamp with time zone");
 

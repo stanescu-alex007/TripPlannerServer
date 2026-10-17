@@ -40,4 +40,81 @@ namespace TripPlanner.Core.Models
 
         public DateTime? BirthDate { get; set; }
     }
+
+    // ── Personal data export ──────────────────────────────────────────────────
+
+    /// <summary>
+    /// What the user gets from "Download my data". Secrets are left out on purpose —
+    /// the password hash, the 2FA secret and token hashes are useless to the person and
+    /// dangerous in a file that may be stored carelessly. Other people's email addresses
+    /// are left out too: they are those people's data, not the user's.
+    /// </summary>
+    public sealed class UserDataExport
+    {
+        public DateTime ExportedAt { get; set; }
+        public ExportedProfile Profile { get; set; } = new();
+        public List<ExportedTrip> Trips { get; set; } = new();
+        public List<ExportedSession> ActiveSessions { get; set; } = new();
+    }
+
+    public sealed class ExportedProfile
+    {
+        public Guid Id { get; set; }
+        public string Email { get; set; } = string.Empty;
+        public string FirstName { get; set; } = string.Empty;
+        public string LastName { get; set; } = string.Empty;
+        public string? Phone { get; set; }
+        public string? ImageUrl { get; set; }
+        public DateTime? BirthDate { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public DateTime? EmailVerifiedAt { get; set; }
+        public DateTime? TermsAcceptedAt { get; set; }
+        public DateTime? PasswordChangedAt { get; set; }
+        public DateTime? TwoFactorEnabledAt { get; set; }
+    }
+
+    public sealed class ExportedTrip
+    {
+        public Guid Id { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public string Location { get; set; } = string.Empty;
+        public DateTime StartDate { get; set; }
+        public DateTime EndDate { get; set; }
+        public decimal Budget { get; set; }
+        public string Currency { get; set; } = string.Empty;
+        public string TransportType { get; set; } = string.Empty;
+        public string? Description { get; set; }
+        public string? Image { get; set; }
+        public DateTime CreatedAt { get; set; }
+
+        public bool IsOwner { get; set; }
+
+        /// <summary>The user's own seat; null on a trip they own but hold no seat on.</summary>
+        public string? MyNickname { get; set; }
+        public string? MyRole { get; set; }
+        public string? MyStatus { get; set; }
+
+        /// <summary>Nicknames only — see <see cref="UserDataExport"/>.</summary>
+        public List<string> OtherParticipants { get; set; } = new();
+
+        public List<ExportedScheduleItem> Schedule { get; set; } = new();
+    }
+
+    public sealed class ExportedScheduleItem
+    {
+        public DateTime Date { get; set; }
+        public TimeOnly? StartTime { get; set; }
+        public TimeOnly? EndTime { get; set; }
+        public string Title { get; set; } = string.Empty;
+        public string? Description { get; set; }
+        public string Status { get; set; } = string.Empty;
+    }
+
+    public sealed class ExportedSession
+    {
+        public string? IpAddress { get; set; }
+        public string? UserAgent { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public DateTime ExpiresAt { get; set; }
+    }
 }
