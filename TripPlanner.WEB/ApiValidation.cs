@@ -1,7 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 using TripPlanner.Core.Common;
-using TripPlanner.Core.Models;
 
 namespace TripPlanner.WEB;
 
@@ -16,20 +15,22 @@ public static class ApiValidation
     /// </summary>
     public static IActionResult BuildResponse(ActionContext context)
     {
-        // Errors carry data = null by design, so the per-field details go to the log
-        // rather than to the client.
         var fields = context.ModelState
             .Where(entry => entry.Value?.Errors.Count > 0)
-            .Select(entry => ToCamelCase(entry.Key));
+            .ToDictionary(
+                entry => ToCamelCase(entry.Key),
+                entry => entry.Value!.Errors
+                    .Select(e => string.IsNullOrWhiteSpace(e.ErrorMessage)
+                        ? "Invalid value."
+                        : e.ErrorMessage)
+                    .ToArray());
 
-        context.HttpContext.RequestServices
-            .GetRequiredService<ILoggerFactory>()
-            .CreateLogger(typeof(ApiValidation))
-            .LogInformation("Validation failed for {Path}: {Fields}.",
-                context.HttpContext.Request.Path, string.Join(", ", fields));
-
-        return new BadRequestObjectResult(
-            ApiResponse.Failure(StatusCodes.Status400BadRequest, ErrorCodes.ValidationFailed));
+        return new BadRequestObjectResult(new
+        {
+            code = ErrorCodes.ValidationFailed.Code,
+            message = ErrorCodes.ValidationFailed.Message,
+            fields
+        });
     }
 
     /// <summary>

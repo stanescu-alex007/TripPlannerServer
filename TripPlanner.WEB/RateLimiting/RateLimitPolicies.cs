@@ -2,7 +2,6 @@ using System.Globalization;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.RateLimiting;
 using TripPlanner.Core.Common;
-using TripPlanner.Core.Models;
 
 namespace TripPlanner.WEB;
 
@@ -57,8 +56,11 @@ public static class RateLimitingServiceCollectionExtensions
 
                 context.HttpContext.Response.ContentType = "application/json";
 
-                await context.HttpContext.Response.WriteAsJsonAsync(
-                    ApiResponse.Failure(StatusCodes.Status429TooManyRequests, ErrorCodes.TooManyAttempts), ct);
+                await context.HttpContext.Response.WriteAsJsonAsync(new
+                {
+                    code = ErrorCodes.TooManyAttempts.Code,
+                    message = ErrorCodes.TooManyAttempts.Message
+                }, ct);
             };
 
             options.AddPolicy(RateLimitPolicies.Login, PartitionByIp(permit: 10, perMinutes: 5));
