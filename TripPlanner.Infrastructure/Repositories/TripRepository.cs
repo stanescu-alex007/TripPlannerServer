@@ -186,6 +186,16 @@ namespace TripPlanner.Infrastructure.Repositories
             return tripIds.Count;
         }
 
+        public Task<List<Trip>> GetForExportAsync(Guid userId, CancellationToken ct = default) =>
+            _context.Trips
+                .Include(t => t.Participants)
+                .Include(t => t.ScheduleItems)
+                .Where(t => t.OwnerId == userId || t.Participants.Any(p => p.UserId == userId))
+                .OrderByDescending(t => t.StartDate)
+                .AsSplitQuery()
+                .AsNoTracking()
+                .ToListAsync(ct);
+
         public async Task RemoveUserFromAllTripsAsync(Guid userId, CancellationToken ct = default)
         {
             var seats = await _context.TripParticipants

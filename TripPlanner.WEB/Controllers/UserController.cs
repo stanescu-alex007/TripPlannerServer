@@ -39,6 +39,23 @@ public class UserController : ApiControllerBase
         return result.Success ? Ok(result.Data) : Failure(result.Error!);
     }
 
+    // POST /api/user/me/export — body { "password": "..." }
+    // 200 UserDataExport · 400 AUTH_CURRENT_PASSWORD_INCORRECT | AUTH_PASSWORD_NOT_SET | VALIDATION_FAILED
+    // 401 · 404 · 429 AUTH_TOO_MANY_ATTEMPTS
+    // POST, not GET: the password travels in the body, never in a URL or a log line.
+    [HttpPost("me/export")]
+    [EnableRateLimiting(RateLimitPolicies.Sensitive)]
+    public async Task<IActionResult> Export(
+        [FromBody] PasswordConfirmationRequest request, CancellationToken ct)
+    {
+        var userId = CurrentUserId;
+        if (userId is null) return Failure(ErrorCodes.Unauthenticated);
+
+        var result = await _users.ExportAsync(userId.Value, request.Password, ct);
+
+        return result.Success ? Ok(result.Data) : Failure(result.Error!);
+    }
+
     // DELETE /api/user/me — body { "password": "..." }
     // 204 · 400 AUTH_CURRENT_PASSWORD_INCORRECT | AUTH_PASSWORD_NOT_SET | VALIDATION_FAILED
     // 401 · 404 · 409 CONCURRENCY_CONFLICT · 429 AUTH_TOO_MANY_ATTEMPTS

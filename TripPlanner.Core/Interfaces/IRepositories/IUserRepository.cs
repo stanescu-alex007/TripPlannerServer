@@ -51,6 +51,9 @@ namespace TripPlanner.Core.Interfaces.IRepositories
         /// logins, the password hash and the 2FA secret. None has any history worth
         /// keeping, and left behind they would keep identities claimed by an account
         /// that no longer exists.
+        /// Personal data is anonymized as well — name, email, phone, photo, birth date,
+        /// and the email and nickname on every trip seat — so nothing left identifies
+        /// the person.
         /// </summary>
         Task DeleteAsync(User user, CancellationToken ct = default);
 

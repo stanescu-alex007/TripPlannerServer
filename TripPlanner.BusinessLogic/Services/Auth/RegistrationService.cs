@@ -98,7 +98,8 @@ namespace TripPlanner.BusinessLogic.Services.Auth
                 LastName = request.LastName.Trim(),
                 BirthDate = ToUtcDate(request.BirthDate),
                 PasswordHash = _passwords.Hash(request.Password),
-                EmailVerifiedAt = null
+                EmailVerifiedAt = null,
+                TermsAcceptedAt = _clock.GetUtcNow().UtcDateTime
             };
 
             try
