@@ -54,7 +54,10 @@ namespace TripPlanner.BusinessLogic.Services.Auth
         {
             var user = await _users.GetByEmailAsync(EmailAddress.Normalize(email), ct);
 
-            if (user is not null)
+            // Still 200 inside the cooldown, so the response reveals nothing about the account.
+            if (user is not null
+                && !await _oneTimeTokens.IssuedRecentlyAsync(
+                    user.Id, UserTokenPurpose.PasswordReset, AuthSettings.EmailResendCooldown, ct))
             {
                 var raw = await _oneTimeTokens.IssueAsync(
                     user.Id, UserTokenPurpose.PasswordReset, ResetLifetime, ct: ct);

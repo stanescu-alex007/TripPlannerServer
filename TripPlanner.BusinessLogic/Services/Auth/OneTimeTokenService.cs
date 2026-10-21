@@ -42,6 +42,10 @@ namespace TripPlanner.BusinessLogic.Services.Auth
             return raw;
         }
 
+        public Task<bool> IssuedRecentlyAsync(
+            Guid userId, string purpose, TimeSpan window, CancellationToken ct = default) =>
+            _tokens.IssuedSinceAsync(userId, purpose, _clock.GetUtcNow().UtcDateTime - window, ct);
+
         public async Task<Result<UserToken>> FindUsableAsync(
             string rawToken, string purpose, CancellationToken ct = default)
         {

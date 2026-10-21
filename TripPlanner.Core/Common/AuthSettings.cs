@@ -38,6 +38,13 @@ public sealed class AuthSettings
     public int EmailVerificationHours { get; init; } = 24;
     public int PasswordResetMinutes { get; init; } = 30;
 
+    /// <summary>
+    /// Minimum gap between two verification or reset emails to the same account. The
+    /// per-IP rate limit alone still let ten emails hit one inbox in a few seconds.
+    /// Keep in sync with the frontend's resend countdown.
+    /// </summary>
+    public static readonly TimeSpan EmailResendCooldown = TimeSpan.FromSeconds(60);
+
     // ── Password policy ───────────────────────────────────────────────────────
     /// <summary>Keep in sync with the frontend validator, or users get rejected after the fact.</summary>
     public int PasswordMinLength { get; init; } = 8;

@@ -25,6 +25,9 @@ namespace TripPlanner.Core.Interfaces.IRepositories
         /// </summary>
         Task<int> InvalidateOutstandingAsync(Guid userId, string purpose, CancellationToken ct = default);
 
+        /// <summary>True if a token for this user and purpose was issued at or after <paramref name="since"/>.</summary>
+        Task<bool> IssuedSinceAsync(Guid userId, string purpose, DateTime since, CancellationToken ct = default);
+
         Task<int> DeleteExpiredAsync(DateTime cutoff, CancellationToken ct = default);
     }
 }

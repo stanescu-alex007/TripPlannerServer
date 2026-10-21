@@ -19,6 +19,13 @@ namespace TripPlanner.Core.Interfaces.IServices
             string? newEmail = null, CancellationToken ct = default);
 
         /// <summary>
+        /// True if a token for this user and purpose went out within the last
+        /// <paramref name="window"/>. Flows that email a link check it first, so repeated
+        /// clicks or a script cannot flood someone's inbox.
+        /// </summary>
+        Task<bool> IssuedRecentlyAsync(Guid userId, string purpose, TimeSpan window, CancellationToken ct = default);
+
+        /// <summary>
         /// Finds a token that can still be used — with its user loaded — or reports why it
         /// cannot. Does not consume it.
         /// </summary>
