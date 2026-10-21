@@ -152,8 +152,13 @@ namespace TripPlanner.BusinessLogic.Services.Auth
         {
             var user = await _users.GetByEmailAsync(EmailAddress.Normalize(email), ct);
 
-            if (user is not null && !user.IsEmailVerified)
+            // Still 200 inside the cooldown, so the response reveals nothing about the account.
+            if (user is not null && !user.IsEmailVerified
+                && !await _oneTimeTokens.IssuedRecentlyAsync(
+                    user.Id, UserTokenPurpose.EmailVerification, AuthSettings.EmailResendCooldown, ct))
+            {
                 await SendVerificationEmailAsync(user, ct);
+            }
 
             return Result.Ok();
         }
