@@ -57,6 +57,10 @@ namespace TripPlanner.Infrastructure.Repositories
                     .SetProperty(t => t.UpdatedAt, now), ct);
         }
 
+        public Task<bool> IssuedSinceAsync(Guid userId, string purpose, DateTime since, CancellationToken ct = default) =>
+            _context.UserTokens.AnyAsync(
+                t => t.UserId == userId && t.Purpose == purpose && t.CreatedAt >= since, ct);
+
         public Task<int> DeleteExpiredAsync(DateTime cutoff, CancellationToken ct = default) =>
             _context.UserTokens
                 .Where(t => t.ExpiresAt < cutoff)
